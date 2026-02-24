@@ -1,5 +1,3 @@
-# .gitignore
-# Environment variables
 .env
 
 # Virtual environment
@@ -9,5 +7,8 @@
 data/
 
 # Python cache
-__pycache__/
+*__pycache__/
 *.pyc
+
+
+*logs/

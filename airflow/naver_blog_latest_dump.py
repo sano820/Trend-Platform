@@ -12,18 +12,29 @@ import html
 import argparse
 import hashlib
 import random
+import sqlite3
 from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse, parse_qs, urlunparse, quote
+
 from dotenv import load_dotenv
-load_dotenv()
-
-
 import requests
 from bs4 import BeautifulSoup
 
+# timezone constants
+KST = timezone(timedelta(hours=9))
+
+load_dotenv()
+
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0 Safari/537.36"
+
+# -----------------------------
+# 0) 수집한 파일 저장 위치
+# -----------------------------
+AIRFLOW_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))  # .../airflow
+PROJECT_ROOT = os.path.abspath(os.path.join(AIRFLOW_DIR, ".."))              # .../Trend-Platform
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 
 # -----------------------------
 # 1) Token sampling pool
@@ -167,7 +178,7 @@ def discover_latest(
     tokens = token_pool[:min(tokens_per_run, len(token_pool))]
 
     uniq: Dict[str, DiscoveredItem] = {}
-    discovered_at = datetime.now(timezone.utc).isoformat()
+    discovered_at = datetime.now(KST).isoformat()   
 
     api_calls = 0
     for token in tokens:
@@ -283,9 +294,73 @@ def fetch_post_content(url: str) -> Dict:
         res = fetch_by_playwright(target)
         return {"url": target, **res, "fallback_reason": str(e)}
 
+# -----------------------------
+# 7-1) SQLite 유틸 함수 추가
+# -----------------------------
+def _seen_init(conn: sqlite3.Connection):
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS seen_urls (
+        url TEXT PRIMARY KEY,
+        first_seen_at TEXT NOT NULL
+    )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_seen_first_seen ON seen_urls(first_seen_at)")
+    conn.commit()
+
+def _seen_prune(conn: sqlite3.Connection, ttl_hours: int, now_iso: str):
+    # now_iso는 ISO 문자열(예: 2026-02-24T12:00:00+09:00)
+    # SQLite에서는 문자열 비교가 안전하려면 동일 포맷을 써야 해서 ISO를 그대로 저장/비교
+    # prune 기준 시각 계산은 파이썬에서.
+    from datetime import datetime, timedelta
+    now_dt = datetime.fromisoformat(now_iso)
+    cutoff = (now_dt - timedelta(hours=ttl_hours)).isoformat()
+    conn.execute("DELETE FROM seen_urls WHERE first_seen_at < ?", (cutoff,))
+    conn.commit()
+
+def _seen_filter_new(urls: List[str], seen_db_path: str, ttl_hours: int, now_iso: str) -> Tuple[List[str], int]:
+    """
+    urls 중에서 TTL 기간 내 이미 본 url은 제외하고 신규만 반환.
+    반환: (new_urls, skipped_count)
+    """
+    if not seen_db_path:
+        return urls, 0
+
+    os.makedirs(os.path.dirname(seen_db_path) or ".", exist_ok=True)
+    conn = sqlite3.connect(seen_db_path, timeout=30)
+    try:
+        _seen_init(conn)
+        _seen_prune(conn, ttl_hours=ttl_hours, now_iso=now_iso)
+
+        # 존재 여부 체크
+        new_urls = []
+        skipped = 0
+        for u in urls:
+            row = conn.execute("SELECT 1 FROM seen_urls WHERE url = ? LIMIT 1", (u,)).fetchone()
+            if row:
+                skipped += 1
+            else:
+                new_urls.append(u)
+        return new_urls, skipped
+    finally:
+        conn.close()
+
+def _seen_mark(urls: List[str], seen_db_path: str, now_iso: str) -> None:
+    if not seen_db_path or not urls:
+        return
+    conn = sqlite3.connect(seen_db_path, timeout=30)
+    try:
+        _seen_init(conn)
+        # 신규만 insert (PRIMARY KEY 충돌 시 무시)
+        conn.executemany(
+            "INSERT OR IGNORE INTO seen_urls(url, first_seen_at) VALUES(?, ?)",
+            [(u, now_iso) for u in urls],
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 # -----------------------------
-# 7) Saving results
+# 7-2) Saving results
 # -----------------------------
 def safe_id(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()[:16]
@@ -341,7 +416,7 @@ def save_contents(run_dir: str, items: List[DiscoveredItem], max_fetch: int = 10
     out_path = os.path.join(run_dir, "posts.json")
     payload = {
         "run_dir": run_dir,
-        "saved_at": datetime.now(timezone.utc).isoformat(),
+        "saved_at": datetime.now(KST).isoformat(),
         "requested_max_fetch": max_fetch,
         "saved_count": len(posts),
         "failed_count": len(failures),
@@ -368,7 +443,12 @@ def main():
     ap.add_argument("--sleep", type=float, default=0.1, help="API 호출 간 sleep(초)")
     ap.add_argument("--fetch-content", action="store_true", help="본문까지 저장")
     ap.add_argument("--max-fetch", type=int, default=200, help="본문 저장 최대 개수(기본 200, 필요 시 1000)")
+    ap.add_argument("--out-dir", type=str, default=DATA_DIR, help="결과 저장 루트 디렉토리 (예: /data)")
+    ap.add_argument("--seen-db", type=str, default="", help="중복 제거용 sqlite 경로. 예: /data/seen_urls.sqlite")
+    ap.add_argument("--seen-ttl-hours", type=int, default=24, help="seen TTL 시간(기본 24시간)")
     args = ap.parse_args()
+
+    os.makedirs(args.out_dir, exist_ok=True)
 
     client_id = os.getenv("NAVER_CLIENT_ID", "").strip()
     client_secret = os.getenv("NAVER_CLIENT_SECRET", "").strip()
@@ -376,7 +456,7 @@ def main():
         raise SystemExit("환경변수 NAVER_CLIENT_ID, NAVER_CLIENT_SECRET 를 설정해 주세요.")
 
     starts = [int(x.strip()) for x in args.starts.split(",") if x.strip()]
-    run_dir = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_dir = os.path.join(args.out_dir, f"run_{datetime.now(KST).strftime('%Y%m%d_%H%M%S')}")
 
     items = discover_latest(
         client_id=client_id,
@@ -389,6 +469,26 @@ def main():
         sleep_s=args.sleep,
     )
 
+    # -----------------------------
+    # (NEW) run 간 dedupe: 최근 24시간 seen 스킵
+    # -----------------------------
+    now_iso = datetime.now(KST).isoformat()
+    seen_db = args.seen_db.strip()
+    ttl_hours = args.seen_ttl_hours
+
+    if seen_db:
+        urls = [it.url for it in items]
+        new_urls, skipped = _seen_filter_new(
+            urls, seen_db_path=seen_db, ttl_hours=ttl_hours, now_iso=now_iso
+        )
+        new_set = set(new_urls)
+        items = [it for it in items if it.url in new_set]
+        print(f"[dedupe] seen_db={seen_db} ttl_hours={ttl_hours} skipped={skipped} remaining={len(items)}")
+
+        if not items:
+            print("[dedupe] 신규 URL이 없습니다(최근 TTL 내 중복). 다음 스케줄에서 재시도.")
+            return
+        
     if not items:
         print("발견된 URL이 없습니다. tokens/starts를 늘리거나 토큰 풀을 바꿔보세요.")
         return
@@ -397,6 +497,12 @@ def main():
 
     if args.fetch_content:
         save_contents(run_dir, items, max_fetch=args.max_fetch, sleep_s=0.2)
+
+    # -----------------------------
+    # seen 마킹: 이번 run에서 처리한 URL 기록
+    # -----------------------------
+    if args.seen_db:
+        _seen_mark([it.url for it in items[:args.max_fetch]], seen_db_path=args.seen_db, now_iso=now_iso)
 
 
 if __name__ == "__main__":
