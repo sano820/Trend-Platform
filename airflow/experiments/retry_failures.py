@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 # naver_blog_latest_dump.py 안의 함수 재사용
-from naver_blog_latest_dump import fetch_post_content
+from airflow.naver_blog_latest_dump import fetch_post_content
 
 # 이미 실행해서 만들어진 run 결과 폴더를 가리킴
 RUN_DIR = "run_20260223_153011"
