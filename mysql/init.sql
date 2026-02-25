@@ -78,3 +78,16 @@ CREATE TABLE IF NOT EXISTS predictions (
   PRIMARY KEY (predict_date, token),        -- 예측일×토큰 유일(중복 예측 저장 방지)
   KEY ix_score (score)                      -- 점수 기준 정렬/Top-N 조회 성능용 인덱스
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================================
+-- 5) Daily Reports (일일 보고서)
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS daily_reports (
+  report_date DATE NOT NULL,                 -- 보고서 기준 날짜
+  title TEXT NOT NULL,                       -- 보고서 제목
+  summary TEXT NULL,                         -- 요약
+  content_md LONGTEXT NULL,                  -- 본문 (Markdown)
+  keywords_json TEXT NULL,                   -- 키워드 JSON 배열 문자열
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (report_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -32,6 +32,8 @@ services:
       REDIS_PORT: ${REDIS_PORT_INTERNAL} # 변경
       REDIS_DB: ${REDIS_DB_INTERNAL} # 변경
       REDIS_KEY: ${REDIS_KEY_TREND} # 변경
+      REDIS_KEY_TOP: ${REDIS_KEY_TOP} # 추가
+      REDIS_KEY_RISING: ${REDIS_KEY_RISING} # 추가
     volumes:
       - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
     depends_on:
@@ -53,6 +55,8 @@ services:
       REDIS_PORT: ${REDIS_PORT_INTERNAL} # 변경
       REDIS_DB: ${REDIS_DB_INTERNAL} # 변경
       REDIS_KEY: ${REDIS_KEY_TREND} # 변경
+      REDIS_KEY_TOP: ${REDIS_KEY_TOP} # 추가
+      REDIS_KEY_RISING: ${REDIS_KEY_RISING} # 추가
     volumes:
       - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
     depends_on:
