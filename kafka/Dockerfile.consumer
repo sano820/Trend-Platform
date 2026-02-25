@@ -1,0 +1,21 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# mysql-connector-python 빌드에 필요한 최소 시스템 패키지
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# 의존성 먼저 설치 (레이어 캐시 활용)
+COPY consumer_requirements.txt .
+RUN pip install --no-cache-dir -r consumer_requirements.txt
+
+COPY consumer.py .
+
+# 보안: non-root 사용자로 실행
+RUN useradd -m -u 1000 appuser
+USER appuser
+
+# -u: stdout 버퍼링 비활성화 → Docker 로그에 즉시 출력
+CMD ["python", "-u", "consumer.py"]
