@@ -1,0 +1,163 @@
+# 분리된 수집 스택 (Airflow → Kafka → MySQL)
+# 변경: 기존 docker-compose.yml에서 수집 관련만 분리
+x-airflow-common: &airflow-common
+  build:
+    context: ./airflow
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_POSTGRES_USER}:${AIRFLOW_POSTGRES_PASSWORD}@postgres/${AIRFLOW_POSTGRES_DB} # 변경: .env 분리
+    AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Seoul
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "True"
+    KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} # 변경: .env 분리
+    NAVER_CLIENT_ID: ${NAVER_CLIENT_ID}
+    NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET}
+    KAFKA_TOPIC_RAW: ${KAFKA_TOPIC_RAW} # 변경: producer에서 참조
+    KAFKA_TOPIC_CLEANED: ${KAFKA_TOPIC_CLEANED} # 변경: producer에서 참조
+    KAFKA_TOPIC_ERROR: ${KAFKA_TOPIC_ERROR} # 변경: producer에서 참조
+    AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER} # 변경: airflow-init에서 참조
+    AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD} # 변경
+    AIRFLOW_ADMIN_FIRSTNAME: ${AIRFLOW_ADMIN_FIRSTNAME} # 변경
+    AIRFLOW_ADMIN_LASTNAME: ${AIRFLOW_ADMIN_LASTNAME} # 변경
+    AIRFLOW_ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL} # 변경
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow:/opt/airflow/airflow
+    - ./kafka:/opt/airflow/kafka    # producer 모듈 import 경로
+    - airflow_logs:/opt/airflow/logs
+    - airflow_plugins:/opt/airflow/plugins
+  dns:
+    - 8.8.8.8
+    - 8.8.4.4
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    postgres:
+      condition: service_healthy
+    kafka:
+      condition: service_healthy
+
+services:
+  # ──────────────────────────────────────────────
+  # Kafka 스택
+  # ──────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    hostname: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    hostname: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "29092:29092"   # 로컬 디버깅용 (host → localhost:29092)
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: ${KAFKA_ADVERTISED_LISTENERS} # 변경: .env 분리
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 2>/dev/null | head -1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} # 변경: init-topics.sh에서 참조
+      KAFKA_TOPICS: ${KAFKA_TOPICS} # 변경
+      KAFKA_TOPIC_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS} # 변경
+      KAFKA_TOPIC_REPLICATION_FACTOR: ${KAFKA_TOPIC_REPLICATION_FACTOR} # 변경
+      KAFKA_TOPIC_RETENTION_MS: ${KAFKA_TOPIC_RETENTION_MS} # 변경
+    volumes:
+      - ./kafka/init-topics.sh:/init-topics.sh
+    entrypoint: ["/bin/bash", "/init-topics.sh"]
+    restart: "no"
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - "8085:8080"   # 호스트 8085 → 컨테이너 8080
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: ${KAFKA_UI_BOOTSTRAP_SERVERS} # 변경: .env 분리
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  blog-consumer:
+    build:
+      context: ./kafka
+      dockerfile: Dockerfile.consumer
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} # 변경: .env 분리
+      KAFKA_TOPIC: ${KAFKA_TOPIC_RAW} # 변경
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_RAW} # 변경
+      KAFKA_AUTO_OFFSET_RESET: ${KAFKA_AUTO_OFFSET_RESET} # 변경
+      CONSUMER_POLL_TIMEOUT_MS: ${CONSUMER_POLL_TIMEOUT_MS} # 변경
+      DB_CONNECT_RETRIES: ${DB_CONNECT_RETRIES} # 변경
+      DB_CONNECT_RETRY_DELAY: ${DB_CONNECT_RETRY_DELAY} # 변경
+      MYSQL_HOST: ${CONSUMER_MYSQL_HOST} # 변경: fallback 제거
+      MYSQL_PORT: ${CONSUMER_MYSQL_PORT} # 변경
+      MYSQL_DATABASE: ${CONSUMER_MYSQL_DATABASE} # 변경
+      MYSQL_USER: ${CONSUMER_MYSQL_USER} # 변경
+      MYSQL_PASSWORD: ${CONSUMER_MYSQL_PASSWORD} # 변경
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
+  # Airflow 스택
+  # ──────────────────────────────────────────────
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${AIRFLOW_POSTGRES_USER} # 변경: .env 분리
+      POSTGRES_PASSWORD: ${AIRFLOW_POSTGRES_PASSWORD} # 변경
+      POSTGRES_DB: ${AIRFLOW_POSTGRES_DB} # 변경
+    volumes:
+      - airflow_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AIRFLOW_POSTGRES_USER}"] # 변경
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  airflow-init:
+    <<: *airflow-common
+    command: >
+      bash -lc "airflow db migrate &&
+      airflow users create --username ${AIRFLOW_ADMIN_USER} --password ${AIRFLOW_ADMIN_PASSWORD} --firstname ${AIRFLOW_ADMIN_FIRSTNAME} --lastname ${AIRFLOW_ADMIN_LASTNAME} --role Admin --email ${AIRFLOW_ADMIN_EMAIL} || true" # 변경: .env 분리
+    restart: "no"
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: always
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    restart: always
+
+volumes:
+  airflow_postgres:
+  airflow_logs:
+  airflow_plugins:
