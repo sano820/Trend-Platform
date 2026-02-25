@@ -2,5 +2,6 @@
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
 redis==5.0.7
+pymysql==1.1.1
 pydantic==2.10.6
 python-dotenv
