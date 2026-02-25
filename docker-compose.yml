@@ -91,27 +91,6 @@ services:
       kafka:
         condition: service_healthy
 
-  # ──────────────────────────────────────────────
-  # MySQL 스택
-  # ──────────────────────────────────────────────
-  mysql:
-    image: mysql:8.0
-    hostname: mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: blog_db
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
-    ports:
-      - "3307:3306"   # WSL2 환경에서 3306 충돌 방지 (호스트에서 localhost:3307 으로 접속)
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-
   blog-consumer:
     build:
       context: ./kafka
@@ -121,15 +100,13 @@ services:
       KAFKA_TOPIC: blog.raw
       KAFKA_GROUP_ID: blog-raw-mysql-sink
       KAFKA_AUTO_OFFSET_RESET: earliest
-      MYSQL_HOST: mysql
-      MYSQL_PORT: 3306
-      MYSQL_DATABASE: blog_db
-      MYSQL_USER: root
-      MYSQL_PASSWORD: root
+      MYSQL_HOST: ${CONSUMER_MYSQL_HOST:-host.docker.internal}
+      MYSQL_PORT: ${CONSUMER_MYSQL_PORT:-3306}
+      MYSQL_DATABASE: ${CONSUMER_MYSQL_DATABASE:-blog_db}
+      MYSQL_USER: ${CONSUMER_MYSQL_USER}
+      MYSQL_PASSWORD: ${CONSUMER_MYSQL_PASSWORD}
     depends_on:
       kafka:
-        condition: service_healthy
-      mysql:
         condition: service_healthy
     restart: unless-stopped
 
