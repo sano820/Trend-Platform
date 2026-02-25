@@ -116,7 +116,74 @@ services:
       - "8080:8080"
     restart: always
 
+  # ──────────────────────────────────────────────
+  # Flink + Redis 스택
+  # ──────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    hostname: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  flink-jobmanager:
+    build:
+      context: ./flink
+    hostname: flink-jobmanager
+    command: jobmanager
+    ports:
+      - "8081:8081"
+    environment:
+      JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: blog.cleaned
+      KAFKA_GROUP_ID: flink-traffic-10m
+      KAFKA_STARTING_OFFSETS: latest
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      REDIS_KEY: trend:traffic:10m
+    volumes:
+      - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  flink-taskmanager:
+    build:
+      context: ./flink
+    hostname: flink-taskmanager
+    command: taskmanager
+    environment:
+      JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: blog.cleaned
+      KAFKA_GROUP_ID: flink-traffic-10m
+      KAFKA_STARTING_OFFSETS: latest
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      REDIS_KEY: trend:traffic:10m
+    volumes:
+      - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
+    depends_on:
+      flink-jobmanager:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   airflow_postgres:
   airflow_logs:
   airflow_plugins:
+  redis_data:
