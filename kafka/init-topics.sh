@@ -19,5 +19,6 @@ for TOPIC in blog.raw blog.cleaned blog.error; do
     echo "생성 완료: $TOPIC"
 done
 
+
 echo "=== 토픽 생성 완료 ==="
 kafka-topics --bootstrap-server kafka:9092 --list
