@@ -18,6 +18,9 @@ x-airflow-common: &airflow-common
     - ./kafka:/opt/airflow/kafka    # producer 모듈 import 경로
     - airflow_logs:/opt/airflow/logs
     - airflow_plugins:/opt/airflow/plugins
+  dns:
+    - 8.8.8.8
+    - 8.8.4.4
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     postgres:
