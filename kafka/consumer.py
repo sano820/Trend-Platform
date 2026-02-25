@@ -44,11 +44,11 @@ KAFKA_AUTO_OFFSET_RESET  = os.getenv("KAFKA_AUTO_OFFSET_RESET", "earliest")
 CONSUMER_POLL_TIMEOUT_MS = int(os.getenv("CONSUMER_POLL_TIMEOUT_MS", "1000"))
 
 # MySQL 설정
-MYSQL_HOST     = os.getenv("MYSQL_HOST", "mysql")
+MYSQL_HOST     = os.getenv("MYSQL_HOST", "host.docker.internal")
 MYSQL_PORT     = int(os.getenv("MYSQL_PORT", "3306"))
 MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "blog_db")
-MYSQL_USER     = os.getenv("MYSQL_USER", "root")
-MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "root")
+MYSQL_USER     = os.getenv("MYSQL_USER", "")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
 
 # DB 재연결 설정
 DB_CONNECT_RETRIES     = int(os.getenv("DB_CONNECT_RETRIES", "5"))
