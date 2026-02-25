@@ -1,3 +1,5 @@
+version: "3.9"
+
 x-airflow-common: &airflow-common
   build:
     context: ./airflow
@@ -15,7 +17,7 @@ x-airflow-common: &airflow-common
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow:/opt/airflow/airflow
-    - ./kafka:/opt/airflow/kafka    # producer 모듈 import 경로
+    - ./kafka:/opt/airflow/kafka  # producer 모듈 import 경로
     - airflow_logs:/opt/airflow/logs
     - airflow_plugins:/opt/airflow/plugins
   dns:
@@ -27,6 +29,12 @@ x-airflow-common: &airflow-common
       condition: service_healthy
     kafka:
       condition: service_healthy
+
+x-spark-image: &spark_image
+  build:
+    context: .
+    dockerfile: ./spark/Dockerfile
+  image: trend_spark_custom:latest
 
 services:
   # ──────────────────────────────────────────────
@@ -204,7 +212,125 @@ services:
       redis:
         condition: service_healthy
 
+  # ──────────────────────────────────────────────
+  # Spark (Batch Prediction)
+  # ──────────────────────────────────────────────
+  spark-master:
+    <<: *spark_image
+    hostname: spark-master
+    environment:
+      - TZ=Asia/Seoul
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+      - PYTHONPATH=/opt/spark-app/spark/daily_pipeline:/opt/spark-app/spark
+    volumes:
+      - ./spark:/opt/spark-app/spark
+    ports:
+      - "7077:7077"
+      - "8088:8080"  # airflow(8080) 충돌 방지
+
+  spark-worker-1:
+    <<: *spark_image
+    hostname: spark-worker-1
+    environment:
+      - TZ=Asia/Seoul
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+      - PYTHONPATH=/opt/spark-app/spark
+    volumes:
+      - ./spark:/opt/spark-app/spark
+    depends_on:
+      - spark-master
+
+  spark-batch:
+    <<: *spark_image
+    hostname: spark-batch
+    depends_on:
+      mysql:
+        condition: service_healthy
+      spark-master:
+        condition: service_started
+    environment:
+      TZ: Asia/Seoul
+      PYTHONPATH: /opt/spark-app/spark
+
+      # MySQL (compose 내부 mysql 서비스 사용)
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: blog_db
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root
+
+      # Table names
+      RAW_TABLE: "${RAW_TABLE:-blog_post}"
+      CLEANED_TABLE: "${CLEANED_TABLE:-cleaned_docs}"
+      STATS_TABLE: "${STATS_TABLE:-daily_token_stats}"
+      PRED_TABLE: "${PRED_TABLE:-predictions}"
+
+      # discovered_at timezone handling
+      DISCOVERED_AT_IS_UTC: "${DISCOVERED_AT_IS_UTC:-true}"
+
+      # Pipeline
+      RUN_DATE: "${RUN_DATE:-2026-02-25}"
+      WINDOW_DAYS: "${WINDOW_DAYS:-7}"
+      TOP_N: "${TOP_N:-50}"
+      REBUILD_WINDOW: "${REBUILD_WINDOW:-true}"
+
+      # Candidate thresholds
+      MIN_DOC_TODAY: "${MIN_DOC_TODAY:-5}"
+      MIN_COUNT_TODAY: "${MIN_COUNT_TODAY:-10}"
+
+      # Burst thresholds
+      GROWTH_RATIO_MIN: "${GROWTH_RATIO_MIN:-2.0}"
+      PREV_MEAN_MAX: "${PREV_MEAN_MAX:-3.0}"
+
+      # Score weights
+      W_BURST: "${W_BURST:-1.5}"
+      W_STABLE: "${W_STABLE:-0.7}"
+      W_UNCERTAIN: "${W_UNCERTAIN:-0.3}"
+
+      # Token filters
+      MIN_TOKEN_LEN: "${MIN_TOKEN_LEN:-2}"
+      MAX_TOKEN_LEN: "${MAX_TOKEN_LEN:-20}"
+
+      # Tokenizer
+      TOKENIZER_MODE: "${TOKENIZER_MODE:-morph}"
+      MORPH_ALLOWED_TAGS: "${MORPH_ALLOWED_TAGS:-NNG,NNP,NNB,NR,NP,SL}"
+
+      # Stopwords (지니 현재 spark 폴더 구조 기준)
+      STOPWORDS_PATH: "${STOPWORDS_PATH:-/opt/spark-app/spark/resources/stopwords_ko.txt}"
+
+    volumes:
+      - ./spark:/opt/spark-app/spark
+
+    command: >
+      bash -lc "
+      spark-submit \
+        --master spark://spark-master:7077 \
+        --conf spark.sql.session.timeZone=Asia/Seoul \
+        --conf spark.driverEnv.PYTHONPATH=/opt/spark-app/spark \
+        --conf spark.executorEnv.PYTHONPATH=/opt/spark-app/spark \
+        --conf spark.driver.extraClassPath=/opt/bitnami/spark/jars/mysql-connector-j-8.4.0.jar \
+        --conf spark.executor.extraClassPath=/opt/bitnami/spark/jars/mysql-connector-j-8.4.0.jar \
+        /opt/spark-app/spark/daily_pipeline/daily_pipeline_job.py \
+          --run-date $${RUN_DATE} \
+          --window-days $${WINDOW_DAYS} \
+          --top-n $${TOP_N} \
+          --rebuild-window $${REBUILD_WINDOW}
+      "
+
 volumes:
   airflow_postgres:
   airflow_logs:
   airflow_plugins:
+  redis_data:
+  mysql_data:
