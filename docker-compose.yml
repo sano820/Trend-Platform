@@ -189,13 +189,21 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_TOPIC: blog.cleaned
       KAFKA_GROUP_ID: flink-traffic-10m
+      KAFKA_TOP_TOKENS_GROUP_ID: flink-top-tokens-10m
       KAFKA_STARTING_OFFSETS: latest
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_DB: 0
       REDIS_KEY: trend:traffic:10m
+      REDIS_TOP_TOKENS_KEY: trend:top_tokens:10m:latest
+      REDIS_TOP_TOKENS_TTL_SECONDS: 86400
+      TOP_TOKENS_N: 20
+      MAX_TOKENS_PER_POST: 300
+      TOP_TOKENS_STOPWORDS_FILE: /opt/flink/usrlib/stopwords_ko.txt
     volumes:
       - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
+      - ./flink/top_tokens_10m_to_redis_job.py:/opt/flink/usrlib/top_tokens_10m_to_redis_job.py
+      - ./flink/stopwords_ko.txt:/opt/flink/usrlib/stopwords_ko.txt
     depends_on:
       kafka:
         condition: service_healthy
@@ -209,16 +217,26 @@ services:
     command: taskmanager
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
+      FLINK_PROPERTIES: |
+        taskmanager.numberOfTaskSlots: 2
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_TOPIC: blog.cleaned
       KAFKA_GROUP_ID: flink-traffic-10m
+      KAFKA_TOP_TOKENS_GROUP_ID: flink-top-tokens-10m
       KAFKA_STARTING_OFFSETS: latest
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_DB: 0
       REDIS_KEY: trend:traffic:10m
+      REDIS_TOP_TOKENS_KEY: trend:top_tokens:10m:latest
+      REDIS_TOP_TOKENS_TTL_SECONDS: 86400
+      TOP_TOKENS_N: 20
+      MAX_TOKENS_PER_POST: 300
+      TOP_TOKENS_STOPWORDS_FILE: /opt/flink/usrlib/stopwords_ko.txt
     volumes:
       - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
+      - ./flink/top_tokens_10m_to_redis_job.py:/opt/flink/usrlib/top_tokens_10m_to_redis_job.py
+      - ./flink/stopwords_ko.txt:/opt/flink/usrlib/stopwords_ko.txt
     depends_on:
       flink-jobmanager:
         condition: service_started

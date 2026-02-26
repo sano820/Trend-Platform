@@ -16,5 +16,7 @@ RUN wget -O /opt/flink/lib/kafka-clients-3.5.1.jar \
 
 WORKDIR /opt/flink/usrlib
 COPY traffic_10m_to_redis_job.py /opt/flink/usrlib/traffic_10m_to_redis_job.py
+COPY top_tokens_10m_to_redis_job.py /opt/flink/usrlib/top_tokens_10m_to_redis_job.py
+COPY stopwords_ko.txt /opt/flink/usrlib/stopwords_ko.txt
 
 USER flink
