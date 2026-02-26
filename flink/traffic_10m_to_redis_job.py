@@ -115,7 +115,7 @@ def build_job():
     redis_host = os.getenv("REDIS_HOST", "localhost")
     redis_port = int(os.getenv("REDIS_PORT", "6379"))
     redis_db = int(os.getenv("REDIS_DB", "0"))
-    redis_key = os.getenv("REDIS_KEY", "trend:traffic:10m")
+    redis_key = os.getenv("REDIS_KEY_TREND", "trend:traffic:10m")
 
     startup_mode = "earliest-offset" if kafka_start == "earliest" else "latest-offset"
 
