@@ -1,0 +1,11 @@
+# Daily batch job dependencies (Spark driver + executors)
+# Add these to your existing Spark image / venv.
+
+pandas==2.2.2
+numpy==2.0.1
+scikit-learn==1.5.1
+pymysql==1.1.1
+python-dateutil==2.9.0.post0
+python-dotenv==1.0.1
+kiwipiepy>=0.18.0,<1.0
+openai>=1.0.0,<2.0

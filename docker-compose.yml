@@ -1,21 +1,31 @@
+version: "3.9"
+
 x-airflow-common: &airflow-common
   build:
     context: ./airflow
   environment:
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_POSTGRES_USER}:${AIRFLOW_POSTGRES_PASSWORD}@postgres/${AIRFLOW_POSTGRES_DB} # 변경: .env 분리
     AIRFLOW__CORE__LOAD_EXAMPLES: "False"
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
     AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Seoul
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "True"
-    KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} # 변경: .env 분리
     NAVER_CLIENT_ID: ${NAVER_CLIENT_ID}
     NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET}
+    KAFKA_TOPIC_RAW: ${KAFKA_TOPIC_RAW} # 변경: producer에서 참조
+    KAFKA_TOPIC_CLEANED: ${KAFKA_TOPIC_CLEANED} # 변경: producer에서 참조
+    KAFKA_TOPIC_ERROR: ${KAFKA_TOPIC_ERROR} # 변경: producer에서 참조
+    AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER} # 변경: airflow-init에서 참조
+    AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD} # 변경: airflow-init에서 참조
+    AIRFLOW_ADMIN_FIRSTNAME: ${AIRFLOW_ADMIN_FIRSTNAME} # 변경: airflow-init에서 참조
+    AIRFLOW_ADMIN_LASTNAME: ${AIRFLOW_ADMIN_LASTNAME} # 변경: airflow-init에서 참조
+    AIRFLOW_ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL} # 변경: airflow-init에서 참조
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow:/opt/airflow/airflow
-    - ./kafka:/opt/airflow/kafka    # producer 모듈 import 경로
+    - ./kafka:/opt/airflow/kafka  # producer 모듈 import 경로
     - airflow_logs:/opt/airflow/logs
     - airflow_plugins:/opt/airflow/plugins
   dns:
@@ -27,6 +37,12 @@ x-airflow-common: &airflow-common
       condition: service_healthy
     kafka:
       condition: service_healthy
+
+x-spark-image: &spark_image
+  build:
+    context: .
+    dockerfile: ./spark/Dockerfile
+  image: trend_spark_custom:latest
 
 services:
   # ──────────────────────────────────────────────
@@ -50,7 +66,7 @@ services:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_ADVERTISED_LISTENERS: ${KAFKA_ADVERTISED_LISTENERS} # 변경: .env 분리
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
@@ -67,6 +83,12 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} # 변경: init-topics.sh에서 참조
+      KAFKA_TOPICS: ${KAFKA_TOPICS} # 변경
+      KAFKA_TOPIC_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS} # 변경
+      KAFKA_TOPIC_REPLICATION_FACTOR: ${KAFKA_TOPIC_REPLICATION_FACTOR} # 변경
+      KAFKA_TOPIC_RETENTION_MS: ${KAFKA_TOPIC_RETENTION_MS} # 변경
     volumes:
       - ./kafka/init-topics.sh:/init-topics.sh
     entrypoint: ["/bin/bash", "/init-topics.sh"]
@@ -78,50 +100,30 @@ services:
       - "8085:8080"   # 호스트 8085 → 컨테이너 8080
     environment:
       KAFKA_CLUSTERS_0_NAME: local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: ${KAFKA_UI_BOOTSTRAP_SERVERS} # 변경: .env 분리
     depends_on:
       kafka:
         condition: service_healthy
-
-  # ──────────────────────────────────────────────
-  # MySQL 스택
-  # ──────────────────────────────────────────────
-  mysql:
-    image: mysql:8.0
-    hostname: mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: blog_db
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
-    ports:
-      - "3307:3306"   # WSL2 환경에서 3306 충돌 방지 (호스트에서 localhost:3307 으로 접속)
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
 
   blog-consumer:
     build:
       context: ./kafka
       dockerfile: Dockerfile.consumer
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      KAFKA_TOPIC: blog.raw
-      KAFKA_GROUP_ID: blog-raw-mysql-sink
-      KAFKA_AUTO_OFFSET_RESET: earliest
-      MYSQL_HOST: mysql
-      MYSQL_PORT: 3306
-      MYSQL_DATABASE: blog_db
-      MYSQL_USER: root
-      MYSQL_PASSWORD: root
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} # 변경: .env 분리
+      KAFKA_TOPIC: ${KAFKA_TOPIC_RAW} # 변경
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_RAW} # 변경
+      KAFKA_AUTO_OFFSET_RESET: ${KAFKA_AUTO_OFFSET_RESET} # 변경
+      CONSUMER_POLL_TIMEOUT_MS: ${CONSUMER_POLL_TIMEOUT_MS} # 변경
+      DB_CONNECT_RETRIES: ${DB_CONNECT_RETRIES} # 변경
+      DB_CONNECT_RETRY_DELAY: ${DB_CONNECT_RETRY_DELAY} # 변경
+      MYSQL_HOST: ${CONSUMER_MYSQL_HOST} # 변경: fallback 제거
+      MYSQL_PORT: ${CONSUMER_MYSQL_PORT} # 변경
+      MYSQL_DATABASE: ${CONSUMER_MYSQL_DATABASE} # 변경
+      MYSQL_USER: ${CONSUMER_MYSQL_USER} # 변경
+      MYSQL_PASSWORD: ${CONSUMER_MYSQL_PASSWORD} # 변경
     depends_on:
       kafka:
-        condition: service_healthy
-      mysql:
         condition: service_healthy
     restart: unless-stopped
 
@@ -131,13 +133,13 @@ services:
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
-      POSTGRES_DB: airflow
+      POSTGRES_USER: ${AIRFLOW_POSTGRES_USER} # 변경: .env 분리
+      POSTGRES_PASSWORD: ${AIRFLOW_POSTGRES_PASSWORD} # 변경
+      POSTGRES_DB: ${AIRFLOW_POSTGRES_DB} # 변경
     volumes:
       - airflow_postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      test: ["CMD-SHELL", "pg_isready -U ${AIRFLOW_POSTGRES_USER}"] # 변경
       interval: 5s
       timeout: 5s
       retries: 10
@@ -146,7 +148,7 @@ services:
     <<: *airflow-common
     command: >
       bash -lc "airflow db migrate &&
-      airflow users create --username admin --password admin --firstname admin --lastname admin --role Admin --email admin@example.com || true"
+      airflow users create --username ${AIRFLOW_ADMIN_USER} --password ${AIRFLOW_ADMIN_PASSWORD} --firstname ${AIRFLOW_ADMIN_FIRSTNAME} --lastname ${AIRFLOW_ADMIN_LASTNAME} --role Admin --email ${AIRFLOW_ADMIN_EMAIL} || true" # 변경: .env 분리
     restart: "no"
 
   airflow-scheduler:
@@ -186,20 +188,14 @@ services:
       - "8081:8081"
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      KAFKA_TOPIC: blog.cleaned
-      KAFKA_GROUP_ID: flink-traffic-10m
-      KAFKA_TOP_TOKENS_GROUP_ID: flink-top-tokens-10m
-      KAFKA_STARTING_OFFSETS: latest
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_DB: 0
-      REDIS_KEY: trend:traffic:10m
-      REDIS_TOP_TOKENS_KEY: trend:top_tokens:10m:latest
-      REDIS_TOP_TOKENS_TTL_SECONDS: 86400
-      TOP_TOKENS_N: 20
-      MAX_TOKENS_PER_POST: 300
-      TOP_TOKENS_STOPWORDS_FILE: /opt/flink/usrlib/stopwords_ko.txt
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} # 변경: .env 분리
+      KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED} # 변경
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK} # 변경
+      KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS} # 변경
+      REDIS_HOST: ${REDIS_HOST_INTERNAL} # 변경
+      REDIS_PORT: ${REDIS_PORT_INTERNAL} # 변경
+      REDIS_DB: ${REDIS_DB_INTERNAL} # 변경
+      REDIS_KEY: ${REDIS_KEY_TREND} # 변경
     volumes:
       - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
       - ./flink/top_tokens_10m_to_redis_job.py:/opt/flink/usrlib/top_tokens_10m_to_redis_job.py
@@ -217,22 +213,14 @@ services:
     command: taskmanager
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
-      FLINK_PROPERTIES: |
-        taskmanager.numberOfTaskSlots: 2
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      KAFKA_TOPIC: blog.cleaned
-      KAFKA_GROUP_ID: flink-traffic-10m
-      KAFKA_TOP_TOKENS_GROUP_ID: flink-top-tokens-10m
-      KAFKA_STARTING_OFFSETS: latest
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_DB: 0
-      REDIS_KEY: trend:traffic:10m
-      REDIS_TOP_TOKENS_KEY: trend:top_tokens:10m:latest
-      REDIS_TOP_TOKENS_TTL_SECONDS: 86400
-      TOP_TOKENS_N: 20
-      MAX_TOKENS_PER_POST: 300
-      TOP_TOKENS_STOPWORDS_FILE: /opt/flink/usrlib/stopwords_ko.txt
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} # 변경: .env 분리
+      KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED} # 변경
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK} # 변경
+      KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS} # 변경
+      REDIS_HOST: ${REDIS_HOST_INTERNAL} # 변경
+      REDIS_PORT: ${REDIS_PORT_INTERNAL} # 변경
+      REDIS_DB: ${REDIS_DB_INTERNAL} # 변경
+      REDIS_KEY: ${REDIS_KEY_TREND} # 변경
     volumes:
       - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
       - ./flink/top_tokens_10m_to_redis_job.py:/opt/flink/usrlib/top_tokens_10m_to_redis_job.py
@@ -244,6 +232,122 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  # ──────────────────────────────────────────────
+  # Spark (Batch Prediction)
+  # ──────────────────────────────────────────────
+  spark-master:
+    <<: *spark_image
+    hostname: spark-master
+    environment:
+      - TZ=Asia/Seoul
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+      - PYTHONPATH=/opt/spark-app/spark/daily_pipeline:/opt/spark-app/spark
+    volumes:
+      - ./spark:/opt/spark-app/spark
+    ports:
+      - "7077:7077"
+      - "8088:8080"  # airflow(8080) 충돌 방지
+
+  spark-worker-1:
+    <<: *spark_image
+    hostname: spark-worker-1
+    environment:
+      - TZ=Asia/Seoul
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+      - PYTHONPATH=/opt/spark-app/spark
+    volumes:
+      - ./spark:/opt/spark-app/spark
+    depends_on:
+      - spark-master
+
+  spark-batch:
+    <<: *spark_image
+    hostname: spark-batch
+    depends_on:
+      mysql:
+        condition: service_healthy
+      spark-master:
+        condition: service_started
+    environment:
+      TZ: Asia/Seoul
+      PYTHONPATH: /opt/spark-app/spark
+
+      # MySQL (compose 내부 mysql 서비스 사용)
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: blog_db
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root
+
+      # Table names
+      RAW_TABLE: "${RAW_TABLE:-blog_post}"
+      CLEANED_TABLE: "${CLEANED_TABLE:-cleaned_docs}"
+      STATS_TABLE: "${STATS_TABLE:-daily_token_stats}"
+      PRED_TABLE: "${PRED_TABLE:-predictions}"
+
+      # discovered_at timezone handling
+      DISCOVERED_AT_IS_UTC: "${DISCOVERED_AT_IS_UTC:-true}"
+
+      # Pipeline
+      RUN_DATE: "${RUN_DATE:-2026-02-25}"
+      WINDOW_DAYS: "${WINDOW_DAYS:-7}"
+      TOP_N: "${TOP_N:-50}"
+      REBUILD_WINDOW: "${REBUILD_WINDOW:-true}"
+
+      # Candidate thresholds
+      MIN_DOC_TODAY: "${MIN_DOC_TODAY:-5}"
+      MIN_COUNT_TODAY: "${MIN_COUNT_TODAY:-10}"
+
+      # Burst thresholds
+      GROWTH_RATIO_MIN: "${GROWTH_RATIO_MIN:-2.0}"
+      PREV_MEAN_MAX: "${PREV_MEAN_MAX:-3.0}"
+
+      # Score weights
+      W_BURST: "${W_BURST:-1.5}"
+      W_STABLE: "${W_STABLE:-0.7}"
+      W_UNCERTAIN: "${W_UNCERTAIN:-0.3}"
+
+      # Token filters
+      MIN_TOKEN_LEN: "${MIN_TOKEN_LEN:-2}"
+      MAX_TOKEN_LEN: "${MAX_TOKEN_LEN:-20}"
+
+      # Tokenizer
+      TOKENIZER_MODE: "${TOKENIZER_MODE:-morph}"
+      MORPH_ALLOWED_TAGS: "${MORPH_ALLOWED_TAGS:-NNG,NNP,NNB,NR,NP,SL}"
+
+      # Stopwords (지니 현재 spark 폴더 구조 기준)
+      STOPWORDS_PATH: "${STOPWORDS_PATH:-/opt/spark-app/spark/resources/stopwords_ko.txt}"
+
+    volumes:
+      - ./spark:/opt/spark-app/spark
+
+    command: >
+      bash -lc "
+      spark-submit \
+        --master spark://spark-master:7077 \
+        --conf spark.sql.session.timeZone=Asia/Seoul \
+        --conf spark.driverEnv.PYTHONPATH=/opt/spark-app/spark \
+        --conf spark.executorEnv.PYTHONPATH=/opt/spark-app/spark \
+        --conf spark.driver.extraClassPath=/opt/bitnami/spark/jars/mysql-connector-j-8.4.0.jar \
+        --conf spark.executor.extraClassPath=/opt/bitnami/spark/jars/mysql-connector-j-8.4.0.jar \
+        /opt/spark-app/spark/daily_pipeline/daily_pipeline_job.py \
+          --run-date $${RUN_DATE} \
+          --window-days $${WINDOW_DAYS} \
+          --top-n $${TOP_N} \
+          --rebuild-window $${REBUILD_WINDOW}
+      "
 
 volumes:
   airflow_postgres:

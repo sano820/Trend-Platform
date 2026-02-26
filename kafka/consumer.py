@@ -9,7 +9,7 @@ blog.raw 토픽의 메시지를 소비하여 MySQL의 blog_post 테이블에 저
   - 재처리 안전    : DB 실패 시 rollback + offset commit 안 함 → 재시작 시 재처리
   - graceful shutdown : SIGINT/SIGTERM 수신 시 현재 메시지 완료 후 종료
 
-토픽: blog.raw
+토픽: KAFKA_TOPIC 환경변수로 지정
   메시지 형식 (JSON):
     schema_version : "1.0"
     url            : string
@@ -33,26 +33,32 @@ from kafka import KafkaConsumer, TopicPartition
 from kafka.structs import OffsetAndMetadata
 
 # ──────────────────────────────────────────────
-# 설정 (환경변수 우선, 기본값 fallback)
+# 설정 (변경: 하드코딩 제거, .env에서만 읽음)
 # ──────────────────────────────────────────────
 
+def _require_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"환경변수 {name}를 설정해 주세요.")  # 변경: 기본값 제거
+    return value
+
 # Kafka 설정
-KAFKA_BOOTSTRAP_SERVERS  = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:29092").split(",")
-KAFKA_TOPIC              = os.getenv("KAFKA_TOPIC", "blog.raw")
-KAFKA_GROUP_ID           = os.getenv("KAFKA_GROUP_ID", "blog-raw-mysql-sink")
-KAFKA_AUTO_OFFSET_RESET  = os.getenv("KAFKA_AUTO_OFFSET_RESET", "earliest")
-CONSUMER_POLL_TIMEOUT_MS = int(os.getenv("CONSUMER_POLL_TIMEOUT_MS", "1000"))
+KAFKA_BOOTSTRAP_SERVERS  = _require_env("KAFKA_BOOTSTRAP_SERVERS").split(",")
+KAFKA_TOPIC              = _require_env("KAFKA_TOPIC")
+KAFKA_GROUP_ID           = _require_env("KAFKA_GROUP_ID")
+KAFKA_AUTO_OFFSET_RESET  = _require_env("KAFKA_AUTO_OFFSET_RESET")
+CONSUMER_POLL_TIMEOUT_MS = int(_require_env("CONSUMER_POLL_TIMEOUT_MS"))
 
 # MySQL 설정
-MYSQL_HOST     = os.getenv("MYSQL_HOST", "mysql")
-MYSQL_PORT     = int(os.getenv("MYSQL_PORT", "3306"))
-MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "blog_db")
-MYSQL_USER     = os.getenv("MYSQL_USER", "root")
-MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "root")
+MYSQL_HOST     = _require_env("MYSQL_HOST")
+MYSQL_PORT     = int(_require_env("MYSQL_PORT"))
+MYSQL_DATABASE = _require_env("MYSQL_DATABASE")
+MYSQL_USER     = _require_env("MYSQL_USER")
+MYSQL_PASSWORD = _require_env("MYSQL_PASSWORD")
 
 # DB 재연결 설정
-DB_CONNECT_RETRIES     = int(os.getenv("DB_CONNECT_RETRIES", "5"))
-DB_CONNECT_RETRY_DELAY = int(os.getenv("DB_CONNECT_RETRY_DELAY", "3"))   # 초
+DB_CONNECT_RETRIES     = int(_require_env("DB_CONNECT_RETRIES"))
+DB_CONNECT_RETRY_DELAY = int(_require_env("DB_CONNECT_RETRY_DELAY"))   # 초
 
 # ──────────────────────────────────────────────
 # 로깅 설정

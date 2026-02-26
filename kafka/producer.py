@@ -39,12 +39,20 @@ from kafka.errors import KafkaError
 # ──────────────────────────────────────────────
 # 설정
 # ──────────────────────────────────────────────
-KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:29092").split(",")
+def _require_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"환경변수 {name}를 설정해 주세요.")  # 변경: 기본값 제거
+    return value
+
+
+# 변경: 하드코딩 제거, .env에서만 읽음
+KAFKA_BOOTSTRAP_SERVERS = _require_env("KAFKA_BOOTSTRAP_SERVERS").split(",")
 
 TOPICS = {
-    "raw":     "blog.raw",
-    "cleaned": "blog.cleaned",
-    "error":   "blog.error",
+    "raw":     _require_env("KAFKA_TOPIC_RAW"),
+    "cleaned": _require_env("KAFKA_TOPIC_CLEANED"),
+    "error":   _require_env("KAFKA_TOPIC_ERROR"),
 }
 
 logger = logging.getLogger(__name__)
@@ -222,16 +230,16 @@ def publish(posts: list, failures: list | None = None) -> None:
 
         logger.info("─" * 50)
         logger.info("[publish] 전송 완료 요약")
-        logger.info("  [blog.raw]     성공 %d / 요청 %d", counts["raw"],     len(posts))
-        logger.info("  [blog.cleaned] 성공 %d / 요청 %d", counts["cleaned"], len(posts))
-        logger.info("  [blog.error]   전송 %d건 (validation + crawl 실패)",
-                    counts["error"] + failure_count)
+        logger.info("  [%s] 성공 %d / 요청 %d", TOPICS["raw"],     counts["raw"],     len(posts))
+        logger.info("  [%s] 성공 %d / 요청 %d", TOPICS["cleaned"], counts["cleaned"], len(posts))
+        logger.info("  [%s] 전송 %d건 (validation + crawl 실패)",
+                    TOPICS["error"], counts["error"] + failure_count)
         logger.info("─" * 50)
 
         # posts가 있는데 raw 전송이 0건이면 Kafka 연결 문제로 간주하여 예외 발생
         if len(posts) > 0 and counts["raw"] == 0:
             raise RuntimeError(
-                f"posts={len(posts)}건이 있으나 blog.raw 전송 성공 0건 — "
+                f"posts={len(posts)}건이 있으나 {TOPICS['raw']} 전송 성공 0건 — "
                 f"Kafka 연결({KAFKA_BOOTSTRAP_SERVERS}) 또는 토픽 설정을 확인하세요."
             )
 

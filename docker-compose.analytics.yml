@@ -1,0 +1,69 @@
+# 분리된 분석 스택 (Flink + Redis)
+# 변경: 기존 docker-compose.yml에서 분석 관련만 분리
+# 참고: Kafka 브로커는 외부에 있어야 하며, KAFKA_BOOTSTRAP_SERVERS로 접근 가능해야 함
+services:
+  redis:
+    image: redis:7-alpine
+    hostname: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  flink-jobmanager:
+    build:
+      context: ./flink
+    hostname: flink-jobmanager
+    command: jobmanager
+    ports:
+      - "8081:8081"
+    environment:
+      JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} # 변경: .env 분리
+      KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED} # 변경
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK} # 변경
+      KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS} # 변경
+      REDIS_HOST: ${REDIS_HOST_INTERNAL} # 변경
+      REDIS_PORT: ${REDIS_PORT_INTERNAL} # 변경
+      REDIS_DB: ${REDIS_DB_INTERNAL} # 변경
+      REDIS_KEY: ${REDIS_KEY_TREND} # 변경
+      REDIS_KEY_TOP: ${REDIS_KEY_TOP} # 추가
+      REDIS_KEY_RISING: ${REDIS_KEY_RISING} # 추가
+    volumes:
+      - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  flink-taskmanager:
+    build:
+      context: ./flink
+    hostname: flink-taskmanager
+    command: taskmanager
+    environment:
+      JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} # 변경: .env 분리
+      KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED} # 변경
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK} # 변경
+      KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS} # 변경
+      REDIS_HOST: ${REDIS_HOST_INTERNAL} # 변경
+      REDIS_PORT: ${REDIS_PORT_INTERNAL} # 변경
+      REDIS_DB: ${REDIS_DB_INTERNAL} # 변경
+      REDIS_KEY: ${REDIS_KEY_TREND} # 변경
+      REDIS_KEY_TOP: ${REDIS_KEY_TOP} # 추가
+      REDIS_KEY_RISING: ${REDIS_KEY_RISING} # 추가
+    volumes:
+      - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
+    depends_on:
+      flink-jobmanager:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis_data:

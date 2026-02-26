@@ -1,13 +1,14 @@
 # backend/api_server.py
 import os
 import json
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List
 
-from datetime import datetime
+from datetime import datetime, date
 from dotenv import load_dotenv
 load_dotenv()
 
 import redis
+import pymysql
 from fastapi import FastAPI, Response, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -16,21 +17,19 @@ from fastapi.middleware.cors import CORSMiddleware
 # -------------------------
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")  # docker compose 내부면 redis, 로컬이면 localhost
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-KEY_CONTENT = os.getenv("KEY_CONTENT", "metrics:content_change_ratio_1m")
-CONTENT_WINDOW_SEC = int(os.getenv("CONTENT_WINDOW_SEC", "60"))
 
+# Flink 실시간 대시보드 키
+REDIS_KEY_TREND = os.getenv("REDIS_KEY_TREND", "trend:traffic:10m")
+REDIS_KEY_TOP = os.getenv("REDIS_KEY_TOP", "trend:top_tokens:10m")
+REDIS_KEY_RISING = os.getenv("REDIS_KEY_RISING", "trend:rising_tokens:10m")
 
-# spark가 실제로 쓴느 키들
-KEY_TOTAL = os.getenv("KEY_TOTAL", "metrics:events_total_10m_10s")
-KEY_BY_TYPE = os.getenv("KEY_BY_TYPE", "metrics:events_by_type_10m_10s")
-KEY_BOT = os.getenv("KEY_BOT", "metrics:bot_ratio_1m")
-KEY_TOP = os.getenv("KEY_TOP", "metrics:top_domain_5m_top10")
-
-# 프론트에서 기대하는 meta 값(고정해도 됨)
-BUCKET_SEC = int(os.getenv("BUCKET_SEC", "10"))
-RANGE_MIN = int(os.getenv("RANGE_MIN", "10"))
-TOP_WINDOW_MIN = int(os.getenv("TOP_WINDOW_MIN", "5"))
-BOT_WINDOW_SEC = int(os.getenv("BOT_WINDOW_SEC", "60"))
+# MySQL (reports)
+MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
+MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
+MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "blog_db")
+MYSQL_USER = os.getenv("MYSQL_USER", "root")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "root")
+REPORT_TABLE = os.getenv("REPORT_TABLE", "daily_reports")
 
 
 # 개발 단계: CORS 꼬임 방지용 전체 허용
@@ -76,6 +75,19 @@ def _get_json(r: redis.Redis, key: str) -> Optional[Any]:
         return None
 
 
+def _get_mysql_conn() -> pymysql.connections.Connection:
+    return pymysql.connect(
+        host=MYSQL_HOST,
+        port=MYSQL_PORT,
+        user=MYSQL_USER,
+        password=MYSQL_PASSWORD,
+        database=MYSQL_DATABASE,
+        cursorclass=pymysql.cursors.DictCursor,
+        connect_timeout=3,
+        read_timeout=5,
+        write_timeout=5,
+    )
+
 
 
 def _iso_to_epoch(ts: str) -> Optional[int]:
@@ -85,6 +97,20 @@ def _iso_to_epoch(ts: str) -> Optional[int]:
         return int(datetime.fromisoformat(ts).timestamp())
     except Exception:
         return None
+
+
+def _date_to_iso(d: Any) -> Optional[str]:
+    if isinstance(d, date):
+        return d.isoformat()
+    if isinstance(d, datetime):
+        return d.date().isoformat()
+    return None
+
+
+def _dt_to_iso(dt: Any) -> Optional[str]:
+    if isinstance(dt, datetime):
+        return dt.isoformat()
+    return None
 
 # -------------------------
 # Routes
@@ -101,11 +127,9 @@ def health() -> Dict[str, Any]:
             "ok": True,
             "redis": "up",
             "keys": {
-                "total": KEY_TOTAL,
-                "byType": KEY_BY_TYPE,
-                "bot": KEY_BOT,
-                "top": KEY_TOP,
-                "content": KEY_CONTENT,
+                "trend": REDIS_KEY_TREND,
+                "top": REDIS_KEY_TOP,
+                "rising": REDIS_KEY_RISING,
             },
         }
     except Exception as e:
@@ -115,98 +139,111 @@ def health() -> Dict[str, Any]:
 @app.get("/api/dashboard/latest")
 def latest_dashboard(response: Response, limit: Optional[int] = None) -> Any:
     """
-    Redis의 REDIS_KEY 값을 JSON으로 파싱해서 반환.
+    Flink가 Redis에 저장한 실시간 대시보드 값을 그대로 조립해 반환한다.
     - 값 없으면 204
     - JSON 깨지면 502
     - Redis 연결 실패면 503
 
-    Spark가 Redis에 쌓아둔 4개 메트릭 키를 읽어서
-    프론트가 원하는 dashboard JSON 형태로 '조립'해서 반환한다.
-
     Query Parameters:
-    - limit: 반환할 데이터 포인트 개수 제한 (기본값: 제한 없음, 전체 반환)
+    - limit: top/rising 항목 개수 제한
     """
     try:
         r = get_redis()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"redis init failed: {e}")
 
-    total_raw = _get_json(r, KEY_TOTAL)        # list[{ts,count}]
-    by_type_raw = _get_json(r, KEY_BY_TYPE)    # list[{ts,type_counts:{...}}]
-    bot_raw = _get_json(r, KEY_BOT)            # {ts, bot_ratio, bot_count, total_count}
-    top_raw = _get_json(r, KEY_TOP)            # list[{domain,count}]
-    content_raw = _get_json(r, KEY_CONTENT)  # {ts, content_change_ratio, content_changed_count, total_revision_count}
+    traffic = _get_json(r, REDIS_KEY_TREND)
+    top = _get_json(r, REDIS_KEY_TOP)
+    rising = _get_json(r, REDIS_KEY_RISING)
 
     # 아무것도 없으면 204
-    if not any([total_raw, by_type_raw, bot_raw, top_raw, content_raw]):
+    if not any([traffic, top, rising]):
         response.status_code = 204
         return None
 
-    now_epoch = int(datetime.now().timestamp())
+    def _limit_items(payload: Any) -> Any:
+        if not payload or not isinstance(payload, dict):
+            return payload
+        items = payload.get("items")
+        if isinstance(items, list) and limit and limit > 0:
+            payload = dict(payload)
+            payload["items"] = items[:limit]
+        return payload
 
-    # (1) total: [{t,v}]
-    total = []
-    if isinstance(total_raw, list):
-        for item in total_raw:
-            ts = item.get("ts")
-            ep = _iso_to_epoch(ts) if ts else None
-            if ep is None:
-                continue
-            total.append({"t": ep, "v": int(item.get("count", 0))})
-        # 시간 오름차순 정렬
-        total.sort(key=lambda x: x["t"])
-        # limit 적용 (최신 데이터부터)
-        if limit and limit > 0:
-            total = total[-limit:]
-
-    # (2) byType: {type: [{t,v}]}
-    byType: Dict[str, list] = {}
-    if isinstance(by_type_raw, list):
-        for win in by_type_raw:
-            ts = win.get("ts")
-            ep = _iso_to_epoch(ts) if ts else None
-            if ep is None:
-                continue
-            counts = win.get("type_counts") or {}
-            if isinstance(counts, dict):
-                for tname, cnt in counts.items():
-                    byType.setdefault(tname, []).append({"t": ep, "v": int(cnt)})
-
-        # 각 타입별 시간 정렬 및 limit 적용
-        for k in list(byType.keys()):
-            byType[k].sort(key=lambda x: x["t"])
-            if limit and limit > 0:
-                byType[k] = byType[k][-limit:]
-
-    # (3) bot: {windowSec,total,bot,ratio}
-    bot = {"windowSec": BOT_WINDOW_SEC, "total": 0, "bot": 0, "ratio": 0.0}
-    if isinstance(bot_raw, dict):
-        bot["total"] = int(bot_raw.get("total_count", 0))
-        bot["bot"] = int(bot_raw.get("bot_count", 0))
-        bot["ratio"] = float(bot_raw.get("bot_ratio", 0.0))
-
-    # (4) topWiki: [{k,v}]  (Spark는 domain을 쓰고 있으니 domain을 k로 매핑)
-    topWiki = []
-    if isinstance(top_raw, list):
-        for item in top_raw:
-            topWiki.append({"k": item.get("domain"), "v": int(item.get("count", 0))})
-
-    # (5) 
-    contentChange = {"windowSec": CONTENT_WINDOW_SEC, "total": 0, "changed": 0, "ratio": 0.0}
-    if isinstance(content_raw, dict):
-        contentChange["total"] = int(content_raw.get("total_revision_count", 0))
-        contentChange["changed"] = int(content_raw.get("content_changed_count", 0))
-        contentChange["ratio"] = float(content_raw.get("content_change_ratio", 0.0))
-        
-
-    dashboard = {
-        "bucketSec": BUCKET_SEC,
-        "rangeMin": RANGE_MIN,
-        "now": now_epoch,
-        "total": total,
-        "byType": byType,
-        "bot": bot,
-        "topWiki": topWiki,
-        "contentChange": contentChange,   # ✅ 추가
+    return {
+        "traffic": traffic,
+        "top": _limit_items(top),
+        "rising": _limit_items(rising),
     }
-    return dashboard
+
+
+@app.get("/api/reports")
+def list_reports(limit: int = 30) -> Dict[str, Any]:
+    """
+    일일 보고서 목록.
+    """
+    sql = (
+        f"SELECT report_date, title, summary, created_at "
+        f"FROM {REPORT_TABLE} "
+        "ORDER BY report_date DESC "
+        "LIMIT %s"
+    )
+    try:
+        with _get_mysql_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (limit,))
+                rows = cur.fetchall()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"report query failed: {e}")
+
+    items: List[Dict[str, Any]] = []
+    for r in rows:
+        items.append(
+            {
+                "report_date": _date_to_iso(r.get("report_date")),
+                "title": r.get("title"),
+                "summary": r.get("summary"),
+                "created_at": _dt_to_iso(r.get("created_at")),
+            }
+        )
+    return {"items": items}
+
+
+@app.get("/api/reports/{report_date}")
+def get_report(report_date: str) -> Dict[str, Any]:
+    """
+    특정 날짜의 보고서 상세.
+    """
+    sql = (
+        f"SELECT report_date, title, summary, content_md, keywords_json, created_at "
+        f"FROM {REPORT_TABLE} "
+        "WHERE report_date = %s "
+        "LIMIT 1"
+    )
+    try:
+        with _get_mysql_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (report_date,))
+                row = cur.fetchone()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"report query failed: {e}")
+
+    if not row:
+        raise HTTPException(status_code=404, detail="report not found")
+
+    keywords_raw = row.get("keywords_json")
+    keywords = None
+    if isinstance(keywords_raw, str):
+        try:
+            keywords = json.loads(keywords_raw)
+        except json.JSONDecodeError:
+            keywords = None
+
+    return {
+        "report_date": _date_to_iso(row.get("report_date")),
+        "title": row.get("title"),
+        "summary": row.get("summary"),
+        "content_md": row.get("content_md"),
+        "keywords": keywords,
+        "created_at": _dt_to_iso(row.get("created_at")),
+    }
