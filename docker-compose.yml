@@ -198,6 +198,8 @@ services:
       REDIS_KEY: ${REDIS_KEY_TREND} # 변경
     volumes:
       - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
+      - ./flink/top_tokens_10m_to_redis_job.py:/opt/flink/usrlib/top_tokens_10m_to_redis_job.py
+      - ./flink/stopwords_ko.txt:/opt/flink/usrlib/stopwords_ko.txt
     depends_on:
       kafka:
         condition: service_healthy
@@ -221,6 +223,8 @@ services:
       REDIS_KEY: ${REDIS_KEY_TREND} # 변경
     volumes:
       - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
+      - ./flink/top_tokens_10m_to_redis_job.py:/opt/flink/usrlib/top_tokens_10m_to_redis_job.py
+      - ./flink/stopwords_ko.txt:/opt/flink/usrlib/stopwords_ko.txt
     depends_on:
       flink-jobmanager:
         condition: service_started
