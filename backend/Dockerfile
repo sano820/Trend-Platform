@@ -8,10 +8,8 @@ WORKDIR /app
 COPY backend /app/backend
 
 # 의존성 설치
-RUN pip install --no-cache-dir \
-    fastapi \
-    uvicorn[standard] \
-    redis
+COPY backend/requirements.txt /app/backend/requirements.txt
+RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 
 # 포트 오픈
 EXPOSE 8000
