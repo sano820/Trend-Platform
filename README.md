@@ -57,7 +57,7 @@ cp .env.example .env
 docker compose -f docker-compose.collect.yml up -d
 ```
 
-2. 분석 스택 (Flink + Redis)
+2. 분석 스택 (Flink + Redis + Flink Job 제출)
 
 ```
 docker compose -f docker-compose.analytics.yml up -d
