@@ -55,8 +55,8 @@ UA = (
 FETCH_TIMEOUT = 5
 
 # I/O bound(HTTP GET): 네트워크 대기 중 GIL 해제 → 고수치 worker 사용 가능
-# 50 workers × 5s timeout = 최악 250s, 평균 1s 응답 기준 1000 URL ≈ 20s
-MAX_WORKERS = 50
+# 15 workers × 5s timeout = 최악 75s, 평균 1s 응답 기준 1000 URL ≈ 67s
+MAX_WORKERS = 15
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +211,9 @@ def fetch_post(url: str) -> Dict:
         "User-Agent": UA,
         "Accept": "text/html,application/xhtml+xml,*/*;q=0.9",
         "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8",
+        "Referer": "https://m.blog.naver.com/",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
     }
 
     last_exc: Optional[Exception] = None
