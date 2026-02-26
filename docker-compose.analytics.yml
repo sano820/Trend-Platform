@@ -65,5 +65,29 @@ services:
       redis:
         condition: service_healthy
 
+  backend:
+    build:
+      context: .
+      dockerfile: ./backend/Dockerfile
+    hostname: backend
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_KEY_TREND: ${REDIS_KEY_TREND}
+      REDIS_KEY_TOP: ${REDIS_KEY_TOP}
+      REDIS_KEY_RISING: ${REDIS_KEY_RISING}
+      MYSQL_HOST: ${MYSQL_HOST}
+      MYSQL_PORT: ${MYSQL_PORT}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REPORT_TABLE: ${REPORT_TABLE}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+    depends_on:
+      redis:
+        condition: service_healthy
+
 volumes:
   redis_data:
