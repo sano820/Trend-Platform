@@ -27,16 +27,20 @@ services:
         jobmanager.rpc.address: flink-jobmanager
         rest.address: flink-jobmanager
         rest.bind-address: 0.0.0.0
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} 
-      KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED} 
-      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK} 
-      KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS} 
-      REDIS_HOST: ${REDIS_HOST_INTERNAL} 
-      REDIS_PORT: ${REDIS_PORT_INTERNAL} 
-      REDIS_DB: ${REDIS_DB_INTERNAL} 
-      REDIS_KEY: ${REDIS_KEY_TREND} 
-      REDIS_KEY_TOP: ${REDIS_KEY_TOP} 
-      REDIS_KEY_RISING: ${REDIS_KEY_RISING} 
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED}
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK}
+      KAFKA_TOP_TOKENS_GROUP_ID: flink-top-tokens-10m
+      KAFKA_RISING_TOKENS_GROUP_ID: flink-rising-tokens-10m
+      KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS}
+      REDIS_HOST: ${REDIS_HOST_INTERNAL}
+      REDIS_PORT: ${REDIS_PORT_INTERNAL}
+      REDIS_DB: ${REDIS_DB_INTERNAL}
+      REDIS_KEY_TREND: ${REDIS_KEY_TREND}
+      REDIS_KEY_TOP: ${REDIS_KEY_TOP}
+      REDIS_KEY_RISING: ${REDIS_KEY_RISING}
+      REDIS_TOP_TOKENS_TTL_SECONDS: 86400
+      TOP_TOKENS_STOPWORDS_FILE: /opt/flink/usrlib/stopwords_ko.txt
     volumes:
       - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
       - ./flink/top_tokens_10m_to_redis_job.py:/opt/flink/usrlib/top_tokens_10m_to_redis_job.py
@@ -56,16 +60,21 @@ services:
         jobmanager.rpc.address: flink-jobmanager
         rest.address: flink-jobmanager
         rest.bind-address: 0.0.0.0
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} 
-      KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED} 
-      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK} 
-      KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS} 
-      REDIS_HOST: ${REDIS_HOST_INTERNAL} 
-      REDIS_PORT: ${REDIS_PORT_INTERNAL} 
-      REDIS_DB: ${REDIS_DB_INTERNAL} 
-      REDIS_KEY: ${REDIS_KEY_TREND} 
-      REDIS_KEY_TOP: ${REDIS_KEY_TOP} 
-      REDIS_KEY_RISING: ${REDIS_KEY_RISING} 
+        taskmanager.numberOfTaskSlots: 2
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED}
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK}
+      KAFKA_TOP_TOKENS_GROUP_ID: flink-top-tokens-10m
+      KAFKA_RISING_TOKENS_GROUP_ID: flink-rising-tokens-10m
+      KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS}
+      REDIS_HOST: ${REDIS_HOST_INTERNAL}
+      REDIS_PORT: ${REDIS_PORT_INTERNAL}
+      REDIS_DB: ${REDIS_DB_INTERNAL}
+      REDIS_KEY_TREND: ${REDIS_KEY_TREND}
+      REDIS_KEY_TOP: ${REDIS_KEY_TOP}
+      REDIS_KEY_RISING: ${REDIS_KEY_RISING}
+      REDIS_TOP_TOKENS_TTL_SECONDS: 86400
+      TOP_TOKENS_STOPWORDS_FILE: /opt/flink/usrlib/stopwords_ko.txt
     volumes:
       - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
       - ./flink/top_tokens_10m_to_redis_job.py:/opt/flink/usrlib/top_tokens_10m_to_redis_job.py
@@ -91,13 +100,17 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
       KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED}
       KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK}
+      KAFKA_TOP_TOKENS_GROUP_ID: flink-top-tokens-10m
+      KAFKA_RISING_TOKENS_GROUP_ID: flink-rising-tokens-10m
       KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS}
       REDIS_HOST: ${REDIS_HOST_INTERNAL}
       REDIS_PORT: ${REDIS_PORT_INTERNAL}
       REDIS_DB: ${REDIS_DB_INTERNAL}
-      REDIS_KEY: ${REDIS_KEY_TREND}
+      REDIS_KEY_TREND: ${REDIS_KEY_TREND}
       REDIS_KEY_TOP: ${REDIS_KEY_TOP}
       REDIS_KEY_RISING: ${REDIS_KEY_RISING}
+      REDIS_TOP_TOKENS_TTL_SECONDS: 86400
+      TOP_TOKENS_STOPWORDS_FILE: /opt/flink/usrlib/stopwords_ko.txt
     volumes:
       - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
       - ./flink/top_tokens_10m_to_redis_job.py:/opt/flink/usrlib/top_tokens_10m_to_redis_job.py
