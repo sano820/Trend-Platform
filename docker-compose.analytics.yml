@@ -27,18 +27,21 @@ services:
         jobmanager.rpc.address: flink-jobmanager
         rest.address: flink-jobmanager
         rest.bind-address: 0.0.0.0
-        KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} # 변경: .env 분리
-        KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED} # 변경
-        KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK} # 변경
-        KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS} # 변경
-        REDIS_HOST: ${REDIS_HOST_INTERNAL} # 변경
-        REDIS_PORT: ${REDIS_PORT_INTERNAL} # 변경
-        REDIS_DB: ${REDIS_DB_INTERNAL} # 변경
-        REDIS_KEY: ${REDIS_KEY_TREND} # 변경
-        REDIS_KEY_TOP: ${REDIS_KEY_TOP} # 추가
-        REDIS_KEY_RISING: ${REDIS_KEY_RISING} # 추가
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} 
+      KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED} 
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK} 
+      KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS} 
+      REDIS_HOST: ${REDIS_HOST_INTERNAL} 
+      REDIS_PORT: ${REDIS_PORT_INTERNAL} 
+      REDIS_DB: ${REDIS_DB_INTERNAL} 
+      REDIS_KEY: ${REDIS_KEY_TREND} 
+      REDIS_KEY_TOP: ${REDIS_KEY_TOP} 
+      REDIS_KEY_RISING: ${REDIS_KEY_RISING} 
     volumes:
       - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
+      - ./flink/top_tokens_10m_to_redis_job.py:/opt/flink/usrlib/top_tokens_10m_to_redis_job.py
+      - ./flink/rising_tokens_10m_to_redis_job.py:/opt/flink/usrlib/rising_tokens_10m_to_redis_job.py
+      - ./flink/stopwords_ko.txt:/opt/flink/usrlib/stopwords_ko.txt
     depends_on:
       redis:
         condition: service_healthy
@@ -53,18 +56,21 @@ services:
         jobmanager.rpc.address: flink-jobmanager
         rest.address: flink-jobmanager
         rest.bind-address: 0.0.0.0
-        KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} # 변경: .env 분리
-        KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED} # 변경
-        KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK} # 변경
-        KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS} # 변경
-        REDIS_HOST: ${REDIS_HOST_INTERNAL} # 변경
-        REDIS_PORT: ${REDIS_PORT_INTERNAL} # 변경
-        REDIS_DB: ${REDIS_DB_INTERNAL} # 변경
-        REDIS_KEY: ${REDIS_KEY_TREND} # 변경
-        REDIS_KEY_TOP: ${REDIS_KEY_TOP} # 추가
-        REDIS_KEY_RISING: ${REDIS_KEY_RISING} # 추가
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} 
+      KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED} 
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK} 
+      KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS} 
+      REDIS_HOST: ${REDIS_HOST_INTERNAL} 
+      REDIS_PORT: ${REDIS_PORT_INTERNAL} 
+      REDIS_DB: ${REDIS_DB_INTERNAL} 
+      REDIS_KEY: ${REDIS_KEY_TREND} 
+      REDIS_KEY_TOP: ${REDIS_KEY_TOP} 
+      REDIS_KEY_RISING: ${REDIS_KEY_RISING} 
     volumes:
       - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
+      - ./flink/top_tokens_10m_to_redis_job.py:/opt/flink/usrlib/top_tokens_10m_to_redis_job.py
+      - ./flink/rising_tokens_10m_to_redis_job.py:/opt/flink/usrlib/rising_tokens_10m_to_redis_job.py
+      - ./flink/stopwords_ko.txt:/opt/flink/usrlib/stopwords_ko.txt
     depends_on:
       flink-jobmanager:
         condition: service_started
@@ -81,20 +87,21 @@ services:
         jobmanager.rpc.address: flink-jobmanager
         rest.port: 8081
         rest.address: flink-jobmanager
-        JOBMANAGER_URL: http://flink-jobmanager:8081
-        KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
-        KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED}
-        KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK}
-        KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS}
-        REDIS_HOST: ${REDIS_HOST_INTERNAL}
-        REDIS_PORT: ${REDIS_PORT_INTERNAL}
-        REDIS_DB: ${REDIS_DB_INTERNAL}
-        REDIS_KEY: ${REDIS_KEY_TREND}
-        REDIS_KEY_TOP: ${REDIS_KEY_TOP}
-        REDIS_KEY_RISING: ${REDIS_KEY_RISING}
+      JOBMANAGER_URL: http://flink-jobmanager:8081
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED}
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK}
+      KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS}
+      REDIS_HOST: ${REDIS_HOST_INTERNAL}
+      REDIS_PORT: ${REDIS_PORT_INTERNAL}
+      REDIS_DB: ${REDIS_DB_INTERNAL}
+      REDIS_KEY: ${REDIS_KEY_TREND}
+      REDIS_KEY_TOP: ${REDIS_KEY_TOP}
+      REDIS_KEY_RISING: ${REDIS_KEY_RISING}
     volumes:
       - ./flink/traffic_10m_to_redis_job.py:/opt/flink/usrlib/traffic_10m_to_redis_job.py
       - ./flink/top_tokens_10m_to_redis_job.py:/opt/flink/usrlib/top_tokens_10m_to_redis_job.py
+      - ./flink/rising_tokens_10m_to_redis_job.py:/opt/flink/usrlib/rising_tokens_10m_to_redis_job.py
       - ./flink/stopwords_ko.txt:/opt/flink/usrlib/stopwords_ko.txt
       - ./flink/submit_jobs.sh:/opt/flink/usrlib/submit_jobs.sh
     depends_on:
