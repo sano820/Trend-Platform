@@ -14,8 +14,8 @@ for i in {1..30}; do
 done
 
 echo "[submitter] Submitting jobs..."
-/opt/flink/bin/flink run -py /opt/flink/usrlib/traffic_10m_to_redis_job.py
-/opt/flink/bin/flink run -py /opt/flink/usrlib/top_tokens_10m_to_redis_job.py
-/opt/flink/bin/flink run -py /opt/flink/usrlib/rising_tokens_10m_to_redis_job.py
+/opt/flink/bin/flink run -d -py /opt/flink/usrlib/traffic_10m_to_redis_job.py
+/opt/flink/bin/flink run -d -py /opt/flink/usrlib/top_tokens_10m_to_redis_job.py
+/opt/flink/bin/flink run -d -py /opt/flink/usrlib/rising_tokens_10m_to_redis_job.py
 
 echo "[submitter] Done."
