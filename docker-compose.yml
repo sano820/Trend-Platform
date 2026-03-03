@@ -1,6 +1,4 @@
-version: "3.9"
-
-x-airflow-common: &airflow-common
+-airflow-common: &airflow-common
   build:
     context: ./airflow
   environment:
@@ -350,8 +348,8 @@ services:
         --conf spark.sql.session.timeZone=Asia/Seoul \
         --conf spark.driverEnv.PYTHONPATH=/opt/spark-app/spark \
         --conf spark.executorEnv.PYTHONPATH=/opt/spark-app/spark \
-        --conf spark.driver.extraClassPath=/opt/bitnami/spark/jars/mysql-connector-j-8.4.0.jar \
-        --conf spark.executor.extraClassPath=/opt/bitnami/spark/jars/mysql-connector-j-8.4.0.jar \
+        --conf spark.driver.extraClassPath=/opt/spark/jars/mysql-connector-j-8.4.0.jar \
+        --conf spark.executor.extraClassPath=/opt/spark/jars/mysql-connector-j-8.4.0.jar \
         /opt/spark-app/spark/daily_pipeline/daily_pipeline_job.py \
           --run-date $${RUN_DATE} \
           --window-days $${WINDOW_DAYS} \
