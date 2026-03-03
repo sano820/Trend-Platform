@@ -11,7 +11,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Seoul
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "True"
-    KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} # 변경: .env 분리
+    KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_INTERNAL_BOOTSTRAP_SERVERS:-kafka:9092} # KRaft 내부 통신용
     NAVER_CLIENT_ID: ${NAVER_CLIENT_ID}
     NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET}
     KAFKA_TOPIC_RAW: ${KAFKA_TOPIC_RAW} # 변경: producer에서 참조
@@ -48,29 +48,39 @@ services:
   # ──────────────────────────────────────────────
   # Kafka 스택
   # ──────────────────────────────────────────────
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.6.0
-    hostname: zookeeper
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-
   kafka:
     image: confluentinc/cp-kafka:7.6.0
     hostname: kafka
-    depends_on:
-      - zookeeper
     ports:
       - "29092:29092"   # 로컬 디버깅용 (host → localhost:29092)
+    volumes:
+      - kafka_data:/var/lib/kafka/data
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: ${KAFKA_ADVERTISED_LISTENERS} # 변경: .env 분리
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_NODE_ID: "1"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://${KAFKA_EXTERNAL_HOST:-localhost}:29092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT"
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_MIN_INSYNC_REPLICAS: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    command:
+      - /bin/bash
+      - -c
+      - |
+        if [ ! -f "$$KAFKA_LOG_DIRS/meta.properties" ]; then
+          echo "Formatting KRaft storage with CLUSTER_ID=$$CLUSTER_ID"
+          kafka-storage format --ignore-formatted --cluster-id "$$CLUSTER_ID" --config /etc/kafka/kraft/server.properties
+        fi
+        /etc/confluent/docker/run
     healthcheck:
       test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 2>/dev/null | head -1"]
       interval: 10s
@@ -84,7 +94,7 @@ services:
       kafka:
         condition: service_healthy
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} # 변경: init-topics.sh에서 참조
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_INTERNAL_BOOTSTRAP_SERVERS:-kafka:9092} # KRaft 내부 통신용
       KAFKA_TOPICS: ${KAFKA_TOPICS} # 변경
       KAFKA_TOPIC_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS} # 변경
       KAFKA_TOPIC_REPLICATION_FACTOR: ${KAFKA_TOPIC_REPLICATION_FACTOR} # 변경
@@ -100,7 +110,7 @@ services:
       - "8085:8080"   # 호스트 8085 → 컨테이너 8080
     environment:
       KAFKA_CLUSTERS_0_NAME: local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: ${KAFKA_UI_BOOTSTRAP_SERVERS} # 변경: .env 분리
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: ${KAFKA_INTERNAL_BOOTSTRAP_SERVERS:-kafka:9092} # KRaft 내부 통신용
     depends_on:
       kafka:
         condition: service_healthy
@@ -110,7 +120,7 @@ services:
       context: ./kafka
       dockerfile: Dockerfile.consumer
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} # 변경: .env 분리
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_INTERNAL_BOOTSTRAP_SERVERS:-kafka:9092} # KRaft 내부 통신용
       KAFKA_TOPIC: ${KAFKA_TOPIC_RAW} # 변경
       KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_RAW} # 변경
       KAFKA_AUTO_OFFSET_RESET: ${KAFKA_AUTO_OFFSET_RESET} # 변경
@@ -188,7 +198,7 @@ services:
       - "8081:8081"
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} # 변경: .env 분리
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_INTERNAL_BOOTSTRAP_SERVERS:-kafka:9092} # KRaft 내부 통신용
       KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED} # 변경
       KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK} # 변경
       KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS} # 변경
@@ -213,7 +223,7 @@ services:
     command: taskmanager
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS} # 변경: .env 분리
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_INTERNAL_BOOTSTRAP_SERVERS:-kafka:9092} # KRaft 내부 통신용
       KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED} # 변경
       KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK} # 변경
       KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS} # 변경
@@ -355,3 +365,4 @@ volumes:
   airflow_plugins:
   redis_data:
   mysql_data:
+  kafka_data:
