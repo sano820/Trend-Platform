@@ -7,10 +7,6 @@ import { ListSkeleton } from "@/components/Skeletons";
 export default function ReportList({
   reportDate,
   setReportDate,
-  reportQuery,
-  setReportQuery,
-  reportTitleDraft,
-  setReportTitleDraft,
   reportRange,
   setReportRange,
   loading,
@@ -30,8 +26,8 @@ export default function ReportList({
           Daily
         </Badge>
       }
-      className="h-full"
-      contentClassName="space-y-4"
+      className="h-[550px]"
+      contentClassName="flex h-full min-h-0 flex-col gap-4"
     >
       <div className="space-y-2">
         <Input
@@ -39,33 +35,6 @@ export default function ReportList({
           value={reportDate}
           onChange={(e) => setReportDate(e.target.value)}
           className="h-10 border-slate-300 bg-white text-slate-900 focus-visible:ring-teal-500"
-        />
-        <div className="flex items-center gap-2">
-          <Input
-            value={reportTitleDraft}
-            onChange={(e) => setReportTitleDraft(e.target.value)}
-            placeholder="제목 검색"
-            className="h-10 border-slate-300 bg-white text-slate-900 placeholder:text-slate-500 focus-visible:ring-teal-500"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                setReportQuery(reportTitleDraft);
-              }
-            }}
-          />
-          <Button
-            type="button"
-            variant="default"
-            className="h-10 rounded-lg bg-teal-600 px-4 text-white transition-all duration-200 hover:bg-teal-700"
-            onClick={() => setReportQuery(reportTitleDraft)}
-          >
-            검색
-          </Button>
-        </div>
-        <Input
-          value={reportQuery}
-          readOnly
-          placeholder="적용된 제목 검색어"
-          className="h-10 border-slate-200 bg-slate-50 text-slate-600 placeholder:text-slate-500"
         />
         <div className="flex items-center gap-2">
           <Button
@@ -117,7 +86,7 @@ export default function ReportList({
         </div>
       )}
 
-      <div className="max-h-[560px] space-y-2 overflow-y-auto pr-1">
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
         {reportItems.map((item) => (
           <button
             key={item.report_date}

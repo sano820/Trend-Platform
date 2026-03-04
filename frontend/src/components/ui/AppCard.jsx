@@ -12,7 +12,7 @@ export default function AppCard({
   return (
     <Card
       className={cn(
-        "rounded-2xl border border-white/40 bg-white/95 text-slate-900 shadow-lg backdrop-blur transition-all duration-200 hover:shadow-xl",
+        "flex flex-col overflow-hidden rounded-2xl border border-white/40 bg-white/95 text-slate-900 shadow-lg backdrop-blur transition-all duration-200 hover:shadow-xl",
         className
       )}
     >
@@ -30,7 +30,7 @@ export default function AppCard({
           )}
         </CardHeader>
       )}
-      <CardContent className={cn("pt-0", contentClassName)}>{children}</CardContent>
+      <CardContent className={cn("min-h-0 pt-0", contentClassName)}>{children}</CardContent>
     </Card>
   );
 }

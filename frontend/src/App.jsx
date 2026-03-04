@@ -60,8 +60,7 @@ function useFetchJson(url, deps = []) {
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [showAllTop, setShowAllTop] = useState(false);
-  const [reportQuery, setReportQuery] = useState("");
-  const [reportTitleDraft, setReportTitleDraft] = useState("");
+  const [reportQuery] = useState("");
   const [reportRange, setReportRange] = useState("all");
   const [reportDate, setReportDate] = useState(() => {
     const now = new Date();
@@ -166,10 +165,6 @@ export default function App() {
           <ReportsView
             reportDate={reportDate}
             setReportDate={setReportDate}
-            reportQuery={reportQuery}
-            setReportQuery={setReportQuery}
-            reportTitleDraft={reportTitleDraft}
-            setReportTitleDraft={setReportTitleDraft}
             reportRange={reportRange}
             setReportRange={setReportRange}
             reports={reports}

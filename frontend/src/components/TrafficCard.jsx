@@ -1,4 +1,3 @@
-import { Badge } from "@/components/ui/badge";
 import AppCard from "@/components/ui/AppCard";
 import { TrafficSkeleton } from "@/components/Skeletons";
 
@@ -6,15 +5,7 @@ export default function TrafficCard({ loading, error, traffic, formatNumber }) {
   return (
     <AppCard
       title="최근 10분 트래픽"
-      badge={
-        <Badge
-          variant="secondary"
-          className="rounded-full border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] text-slate-700"
-        >
-          1분 슬라이드
-        </Badge>
-      }
-      className="lg:col-span-2"
+      className="min-h-[500px] lg:col-span-2"
     >
       {loading && <TrafficSkeleton />}
       {error && (
@@ -50,7 +41,6 @@ export default function TrafficCard({ loading, error, traffic, formatNumber }) {
               </p>
             </div>
           </div>
-          <p className="text-xs text-slate-600">집계 기준 시각: {traffic.window_end || "-"}</p>
         </div>
       )}
     </AppCard>

@@ -7,6 +7,7 @@ export default function RankListCard({
   pill,
   items,
   variant,
+  className,
   formatNumber,
   formatPercent,
   showToggle,
@@ -24,6 +25,7 @@ export default function RankListCard({
           {pill}
         </Badge>
       }
+      className={className}
       contentClassName="space-y-3"
     >
       {items.length === 0 && (
@@ -44,6 +46,10 @@ export default function RankListCard({
               variant === "top"
                 ? `${formatNumber(item.count)} · 점유율 ${formatPercent(item.share)}`
                 : `${formatNumber(item.prev_count)} → ${formatNumber(item.count)}`;
+            const deltaCount =
+              variant === "rising"
+                ? Number(item.count) - Number(item.prev_count)
+                : null;
 
             return (
               <div
@@ -54,7 +60,12 @@ export default function RankListCard({
                   <div className="text-sm font-semibold text-slate-700">{item.rank || "-"}</div>
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold text-slate-900">{item.token}</div>
-                    <div className="truncate text-xs text-slate-600">{meta}</div>
+                    <div className="truncate text-xs text-slate-600">
+                      {meta}
+                      {variant === "rising" && Number.isFinite(deltaCount) && (
+                        <span className="ml-1 text-red-600">(+{formatNumber(deltaCount)})</span>
+                      )}
+                    </div>
                   </div>
                   <div className="text-xs font-semibold text-teal-700">
                     {item.is_new ? "NEW" : `${formatPercent(item.increase_rate)}`}

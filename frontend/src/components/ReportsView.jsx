@@ -4,10 +4,6 @@ import ReportList from "@/components/ReportList";
 export default function ReportsView({
   reportDate,
   setReportDate,
-  reportQuery,
-  setReportQuery,
-  reportTitleDraft,
-  setReportTitleDraft,
   reportRange,
   setReportRange,
   reports,
@@ -17,15 +13,11 @@ export default function ReportsView({
   reportDetail,
 }) {
   return (
-    <section className="grid grid-cols-1 gap-4 lg:grid-cols-[340px_1fr]">
+    <section className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[340px_1fr]">
       <div className="print:hidden">
         <ReportList
           reportDate={reportDate}
           setReportDate={setReportDate}
-          reportQuery={reportQuery}
-          setReportQuery={setReportQuery}
-          reportTitleDraft={reportTitleDraft}
-          setReportTitleDraft={setReportTitleDraft}
           reportRange={reportRange}
           setReportRange={setReportRange}
           loading={reports.loading}

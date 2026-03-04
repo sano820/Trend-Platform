@@ -8,7 +8,7 @@ export default function ReportDetail({ loading, error, data, onPrint }) {
   return (
     <AppCard
       title="보고서 상세"
-      className="min-h-[500px] print:border-0 print:shadow-none"
+      className="h-[550px] print:border-0 print:shadow-none"
       badge={
         <Badge
           variant="secondary"
@@ -27,7 +27,7 @@ export default function ReportDetail({ loading, error, data, onPrint }) {
           PDF 다운로드
         </Button>
       }
-      contentClassName="space-y-5"
+      contentClassName="flex h-full min-h-0 flex-col"
     >
       {loading && <ReportDetailSkeleton />}
       {error && (
@@ -37,7 +37,7 @@ export default function ReportDetail({ loading, error, data, onPrint }) {
       )}
 
       {!loading && data && (
-        <div className="space-y-5">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto pr-1">
           <div className="space-y-2 border-b border-slate-200 pb-4">
             <p className="text-xs text-slate-600">{data.report_date}</p>
             <h3 className="text-xl font-semibold tracking-tight text-slate-900">
