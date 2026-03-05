@@ -66,17 +66,18 @@ docker compose -f docker-compose.analytics.yml up -d
 3. Spark 배치 (예측)
 
 ```
-docker compose up spark-batch
+RUN_DATE=2026-03-04 docker compose -f docker-compose.analytics.yml up spark-batch
 ```
 
 4. 리포트 생성 (OpenAI)
 
 ```
-docker compose run --rm spark-batch \
-  python /opt/spark-app/spark/daily_pipeline/report_generator.py \
-  --report-date 2026-02-26 \
+docker compose -f docker-compose.analytics.yml run --rm spark-batch \
+  python3 /opt/spark-app/spark/daily_pipeline/report_generator.py \
+  --report-date 2026-03-04 \
   --top-n 20
 ```
+OPENAI 관련 환경변수는 `.env`에 설정되어 있어야 합니다.
 
 5. 백엔드 API 실행
 

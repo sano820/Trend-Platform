@@ -84,10 +84,11 @@ CREATE TABLE IF NOT EXISTS predictions (
 -- =====================================================================
 CREATE TABLE IF NOT EXISTS daily_reports (
   report_date DATE NOT NULL,                 -- 보고서 기준 날짜
+  version INT NOT NULL DEFAULT 1,            -- 동일 날짜 버전
   title TEXT NOT NULL,                       -- 보고서 제목
   summary TEXT NULL,                         -- 요약
   content_md LONGTEXT NULL,                  -- 본문 (Markdown)
   keywords_json TEXT NULL,                   -- 키워드 JSON 배열 문자열
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (report_date)
+  PRIMARY KEY (report_date, version)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
