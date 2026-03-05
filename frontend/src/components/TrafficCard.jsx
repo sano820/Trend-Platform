@@ -1,10 +1,34 @@
 import AppCard from "@/components/ui/AppCard";
 import { TrafficSkeleton } from "@/components/Skeletons";
 
-export default function TrafficCard({ loading, error, traffic, formatNumber }) {
+export default function TrafficCard({
+  loading,
+  error,
+  traffic,
+  trafficHistory,
+  formatNumber,
+}) {
   const recentTotal = Number(traffic?.total_posts ?? 0);
   const prevTotal = Number(traffic?.prev_total_posts ?? 0);
-  const maxTotal = Math.max(recentTotal, prevTotal, 1);
+  const historyItems = Array.isArray(trafficHistory?.data?.items)
+    ? trafficHistory.data.items
+    : [];
+  const historyValues = historyItems
+    .map((item) => Number(item?.total_posts ?? 0))
+    .filter((v) => Number.isFinite(v));
+  const historyMin = historyValues.length ? Math.min(...historyValues) : 0;
+  const historyMax = historyValues.length ? Math.max(...historyValues) : 1;
+  const historyRange = historyMax - historyMin || 1;
+  const sparkPoints =
+    historyValues.length > 1
+      ? historyValues
+          .map((value, idx) => {
+            const x = (idx / (historyValues.length - 1)) * 100;
+            const y = 100 - ((value - historyMin) / historyRange) * 100;
+            return `${x},${y}`;
+          })
+          .join(" ")
+      : "";
   return (
     <AppCard
       title="최근 10분 트래픽"
@@ -46,29 +70,49 @@ export default function TrafficCard({ loading, error, traffic, formatNumber }) {
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-white/80 p-4">
-            <div className="text-xs font-semibold text-slate-700">10분 비교 그래프</div>
-            <div className="mt-3 space-y-3">
-              {[
-                { label: "최근 10분", value: recentTotal, bar: "bg-teal-500" },
-                { label: "직전 10분", value: prevTotal, bar: "bg-slate-400" },
-              ].map((row) => {
-                const width = Math.round((row.value / maxTotal) * 100);
-                return (
-                  <div key={row.label} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs text-slate-600">
-                      <span>{row.label}</span>
-                      <span>{formatNumber(row.value)}</span>
-                    </div>
-                    <div className="h-2 w-full rounded-full bg-slate-100">
-                      <div
-                        className={`h-2 rounded-full ${row.bar}`}
-                        style={{ width: `${width}%` }}
-                        aria-label={`${row.label} ${row.value}`}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+              <span>최근 트래픽 추이 (10분 단위)</span>
+              <span className="text-slate-500">
+                {historyValues.length ? `${historyValues.length}개` : "-"}
+              </span>
+            </div>
+            <div className="mt-3">
+              {historyValues.length > 1 ? (
+                <svg
+                  viewBox="0 0 100 100"
+                  className="h-20 w-full"
+                  role="img"
+                  aria-label="10분 트래픽 스파크라인"
+                  preserveAspectRatio="none"
+                >
+                  <defs>
+                    <linearGradient id="trafficSpark" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#14b8a6" stopOpacity="0.35" />
+                      <stop offset="100%" stopColor="#14b8a6" stopOpacity="0.05" />
+                    </linearGradient>
+                  </defs>
+                  <polyline
+                    points={sparkPoints}
+                    fill="none"
+                    stroke="#0f766e"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <polygon
+                    points={`0,100 ${sparkPoints} 100,100`}
+                    fill="url(#trafficSpark)"
+                  />
+                </svg>
+              ) : (
+                <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-500">
+                  트래픽 히스토리가 아직 없습니다.
+                </div>
+              )}
+              <div className="mt-3 flex items-center justify-between text-xs text-slate-600">
+                <span>직전 10분: {formatNumber(prevTotal)}</span>
+                <span>최근 10분: {formatNumber(recentTotal)}</span>
+              </div>
             </div>
           </div>
         </div>

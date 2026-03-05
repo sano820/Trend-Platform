@@ -69,9 +69,11 @@ export default function App() {
   const [reportsRefreshTick, setReportsRefreshTick] = useState(0);
 
   const dashboardUrl = `${API_BASE}/api/dashboard/latest`;
+  const trafficHistoryUrl = `${API_BASE}/api/dashboard/traffic/history?limit=48`;
   const reportsUrl = `${API_BASE}/api/reports?limit=30`;
 
   const dashboard = useFetchJson(dashboardUrl, [dashboardUrl]);
+  const trafficHistory = useFetchJson(trafficHistoryUrl, [trafficHistoryUrl]);
   const reports = useFetchJson(reportsUrl, [reportsUrl, reportsRefreshTick]);
 
   const [selectedReport, setSelectedReport] = useState(null);
@@ -190,6 +192,7 @@ export default function App() {
           <DashboardView
             dashboard={dashboard}
             traffic={traffic}
+            trafficHistory={trafficHistory}
             topItems={topItems}
             topItemsVisible={topItemsVisible}
             risingItems={risingItems}

@@ -32,11 +32,21 @@ class WindowEventCount(ProcessWindowFunction):
 
 
 class TrafficMetricsProcess(KeyedProcessFunction):
-    def __init__(self, redis_host: str, redis_port: int, redis_db: int, redis_key: str):
+    def __init__(
+        self,
+        redis_host: str,
+        redis_port: int,
+        redis_db: int,
+        redis_key: str,
+        history_key: str,
+        history_max_len: int,
+    ):
         self.redis_host = redis_host
         self.redis_port = redis_port
         self.redis_db = redis_db
         self.redis_key = redis_key
+        self.history_key = history_key
+        self.history_max_len = history_max_len
         self.redis_client = None
 
     def open(self, runtime_context: RuntimeContext):
@@ -95,6 +105,10 @@ class TrafficMetricsProcess(KeyedProcessFunction):
         }
         payload_json = json.dumps(payload, ensure_ascii=False)
         self.redis_client.set(self.redis_key, payload_json)
+
+        if self.history_key and self.history_max_len > 0:
+            self.redis_client.lpush(self.history_key, payload_json)
+            self.redis_client.ltrim(self.history_key, 0, self.history_max_len - 1)
         yield payload_json
 
         expire_before = window_end_ms - (40 * 60 * 1000)
@@ -116,6 +130,8 @@ def build_job():
     redis_port = int(os.getenv("REDIS_PORT", "6379"))
     redis_db = int(os.getenv("REDIS_DB", "0"))
     redis_key = os.getenv("REDIS_KEY_TREND", "trend:traffic:10m")
+    history_key = os.getenv("REDIS_KEY_TREND_HISTORY", "trend:traffic:10m:history")
+    history_max_len = int(os.getenv("REDIS_TREND_HISTORY_MAX_LEN", "48"))
 
     startup_mode = "earliest-offset" if kafka_start == "earliest" else "latest-offset"
 
@@ -171,6 +187,8 @@ def build_job():
                 redis_port=redis_port,
                 redis_db=redis_db,
                 redis_key=redis_key,
+                history_key=history_key,
+                history_max_len=history_max_len,
             ),
             output_type=Types.STRING(),
         )

@@ -177,6 +177,35 @@ def latest_dashboard(response: Response, limit: Optional[int] = None) -> Any:
     }
 
 
+@app.get("/api/dashboard/traffic/history")
+def traffic_history(response: Response, limit: int = 48) -> Any:
+    """
+    10분 트래픽 히스토리 (스파크라인용).
+    """
+    try:
+        r = get_redis()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"redis init failed: {e}")
+
+    history_key = os.getenv("REDIS_KEY_TREND_HISTORY", "trend:traffic:10m:history")
+    safe_limit = max(1, min(limit, 240))
+    raw_items = r.lrange(history_key, 0, safe_limit - 1)
+    if not raw_items:
+        response.status_code = 204
+        return None
+
+    items = []
+    for raw in raw_items:
+        try:
+            items.append(json.loads(raw))
+        except json.JSONDecodeError:
+            continue
+
+    # Redis 리스트는 최신이 앞이므로, 시간순으로 뒤집어서 반환
+    items.reverse()
+    return {"items": items}
+
+
 @app.get("/api/reports")
 def list_reports(limit: int = 30) -> Dict[str, Any]:
     """

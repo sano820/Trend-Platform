@@ -4,6 +4,7 @@ import TrafficCard from "@/components/TrafficCard";
 export default function DashboardView({
   dashboard,
   traffic,
+  trafficHistory,
   topItems,
   topItemsVisible,
   risingItems,
@@ -18,6 +19,7 @@ export default function DashboardView({
         loading={dashboard.loading}
         error={dashboard.error}
         traffic={traffic}
+        trafficHistory={trafficHistory}
         formatNumber={formatNumber}
       />
 
