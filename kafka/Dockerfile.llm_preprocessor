@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# 필요 패키지 설치 (OpenAI/Redis/Kafka)
+COPY llm_preprocessor_requirements.txt .
+RUN pip install --no-cache-dir -r llm_preprocessor_requirements.txt
+
+COPY llm_preprocessor.py .
+
+# 보안: non-root 사용자로 실행
+RUN useradd -m -u 1000 appuser
+USER appuser
+
+# -u: stdout 버퍼링 비활성화 → Docker 로그에 즉시 출력
+CMD ["python", "-u", "llm_preprocessor.py"]

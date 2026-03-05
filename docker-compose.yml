@@ -136,6 +136,41 @@ services:
     restart: unless-stopped
 
   # ──────────────────────────────────────────────
+  # LLM 전처리 서비스 (blog.cleaned -> blog.entities)
+  # ──────────────────────────────────────────────
+  llm-preprocessor:
+    build:
+      context: ./kafka
+      dockerfile: Dockerfile.llm_preprocessor
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_INTERNAL_BOOTSTRAP_SERVERS:-kafka:9092} # KRaft 내부 통신용
+      KAFKA_TOPIC_INPUT: ${KAFKA_TOPIC_CLEANED}
+      KAFKA_TOPIC_OUTPUT: ${KAFKA_TOPIC_ENTITIES}
+      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_ENTITIES_PREPROCESSOR}
+      KAFKA_AUTO_OFFSET_RESET: ${KAFKA_AUTO_OFFSET_RESET}
+      CONSUMER_POLL_TIMEOUT_MS: ${CONSUMER_POLL_TIMEOUT_MS}
+      REDIS_HOST: ${REDIS_HOST_INTERNAL}
+      REDIS_PORT: ${REDIS_PORT_INTERNAL}
+      REDIS_DB: ${REDIS_DB_INTERNAL}
+      ENTITIES_DEDUP_TTL_SECONDS: ${ENTITIES_DEDUP_TTL_SECONDS}
+      ENTITIES_DEDUP_KEY_PREFIX: ${ENTITIES_DEDUP_KEY_PREFIX}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_ENTITIES_MODEL: ${OPENAI_ENTITIES_MODEL}
+      OPENAI_ENTITIES_TEMPERATURE: ${OPENAI_ENTITIES_TEMPERATURE}
+      OPENAI_ENTITIES_MAX_OUTPUT_TOKENS: ${OPENAI_ENTITIES_MAX_OUTPUT_TOKENS}
+      OPENAI_ENTITIES_TIMEOUT_SEC: ${OPENAI_ENTITIES_TIMEOUT_SEC}
+      LLM_FAIL_STRATEGY: ${LLM_FAIL_STRATEGY}
+      LLM_MAX_INPUT_CHARS: ${LLM_MAX_INPUT_CHARS}
+      LLM_MAX_ENTITIES: ${LLM_MAX_ENTITIES}
+      ENTITIES_TOKEN_JOINER: ${ENTITIES_TOKEN_JOINER}
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────
   # Airflow 스택
   # ──────────────────────────────────────────────
   postgres:
@@ -197,7 +232,7 @@ services:
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_INTERNAL_BOOTSTRAP_SERVERS:-kafka:9092} # KRaft 내부 통신용
-      KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED} # 변경
+      KAFKA_TOPIC: ${KAFKA_TOPIC_ENTITIES} # 변경
       KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK} # 변경
       KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS} # 변경
       REDIS_HOST: ${REDIS_HOST_INTERNAL} # 변경
@@ -222,7 +257,7 @@ services:
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_INTERNAL_BOOTSTRAP_SERVERS:-kafka:9092} # KRaft 내부 통신용
-      KAFKA_TOPIC: ${KAFKA_TOPIC_CLEANED} # 변경
+      KAFKA_TOPIC: ${KAFKA_TOPIC_ENTITIES} # 변경
       KAFKA_GROUP_ID: ${KAFKA_GROUP_ID_FLINK} # 변경
       KAFKA_STARTING_OFFSETS: ${KAFKA_STARTING_OFFSETS} # 변경
       REDIS_HOST: ${REDIS_HOST_INTERNAL} # 변경
