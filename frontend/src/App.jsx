@@ -58,28 +58,30 @@ function useFetchJson(url, deps = []) {
 }
 
 export default function App() {
-  const [tab, setTab] = useState("dashboard");
+  const [tab, setTab] = useState(() => {
+    if (typeof window === "undefined") return "dashboard";
+    return window.location.pathname.startsWith("/reports") ? "reports" : "dashboard";
+  });
   const [showAllTop, setShowAllTop] = useState(false);
   const [reportQuery] = useState("");
   const [reportRange, setReportRange] = useState("all");
-  const [reportDate, setReportDate] = useState(() => {
-    const now = new Date();
-    const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-    return kst.toISOString().slice(0, 10);
-  });
+  const [reportDate, setReportDate] = useState("");
+  const [reportsRefreshTick, setReportsRefreshTick] = useState(0);
 
   const dashboardUrl = `${API_BASE}/api/dashboard/latest`;
   const reportsUrl = `${API_BASE}/api/reports?limit=30`;
 
   const dashboard = useFetchJson(dashboardUrl, [dashboardUrl]);
-  const reports = useFetchJson(reportsUrl, [reportsUrl]);
+  const reports = useFetchJson(reportsUrl, [reportsUrl, reportsRefreshTick]);
 
-  const [selectedDate, setSelectedDate] = useState(null);
-  const reportDetailUrl = selectedDate ? `${API_BASE}/api/reports/${selectedDate}` : null;
-  const reportDetail = useFetchJson(
-    reportDetailUrl || "",
-    [reportDetailUrl]
-  );
+  const [selectedReport, setSelectedReport] = useState(null);
+  const reportDetailUrl = selectedReport
+    ? `${API_BASE}/api/reports/${selectedReport.report_date}?version=${selectedReport.version}`
+    : null;
+  const reportDetail = useFetchJson(reportDetailUrl || "", [
+    reportDetailUrl,
+    reportsRefreshTick,
+  ]);
 
   const traffic = dashboard.data?.traffic || null;
   const topItems = dashboard.data?.top?.items || [];
@@ -95,8 +97,9 @@ export default function App() {
     const now = new Date();
     const query = reportQuery.trim().toLowerCase();
     return items.filter((item) => {
-      if (reportDate && item.report_date !== reportDate) return false;
-      if (reportRange !== "all") {
+      if (reportDate) {
+        if (item.report_date !== reportDate) return false;
+      } else if (reportRange !== "all") {
         const days = reportRange === "7" ? 7 : 30;
         const date = new Date(item.report_date);
         const diff = (now - date) / (1000 * 60 * 60 * 24);
@@ -109,10 +112,46 @@ export default function App() {
   }, [reports.data, reportDate, reportQuery, reportRange]);
 
   useEffect(() => {
-    if (!selectedDate && reportItems.length) {
-      setSelectedDate(reportItems[0].report_date);
+    if (!reportItems.length) return;
+    if (!selectedReport) {
+      setSelectedReport({
+        report_date: reportItems[0].report_date,
+        version: reportItems[0].version,
+      });
+      return;
     }
-  }, [reportItems, selectedDate]);
+    const exists = reportItems.some(
+      (item) =>
+        item.report_date === selectedReport.report_date &&
+        item.version === selectedReport.version
+    );
+    if (!exists) {
+      setSelectedReport({
+        report_date: reportItems[0].report_date,
+        version: reportItems[0].version,
+      });
+    }
+  }, [reportItems, selectedReport]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const nextTab = window.location.pathname.startsWith("/reports")
+        ? "reports"
+        : "dashboard";
+      setTab(nextTab);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const targetPath = tab === "reports" ? "/reports" : "/";
+    if (window.location.pathname !== targetPath) {
+      const nextUrl = `${targetPath}${window.location.search}${window.location.hash}`;
+      window.history.pushState(null, "", nextUrl);
+    }
+  }, [tab]);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-[#3BAF87] to-[#9ED7C6] text-slate-900">
@@ -169,9 +208,10 @@ export default function App() {
             setReportRange={setReportRange}
             reports={reports}
             reportItems={reportItems}
-            selectedDate={selectedDate}
-            setSelectedDate={setSelectedDate}
+            selectedReport={selectedReport}
+            setSelectedReport={setSelectedReport}
             reportDetail={reportDetail}
+            onRefreshReports={() => setReportsRefreshTick((v) => v + 1)}
           />
         )}
       </main>

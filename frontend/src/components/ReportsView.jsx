@@ -8,9 +8,10 @@ export default function ReportsView({
   setReportRange,
   reports,
   reportItems,
-  selectedDate,
-  setSelectedDate,
+  selectedReport,
+  setSelectedReport,
   reportDetail,
+  onRefreshReports,
 }) {
   return (
     <section className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[340px_1fr]">
@@ -23,8 +24,9 @@ export default function ReportsView({
           loading={reports.loading}
           error={reports.error}
           reportItems={reportItems}
-          selectedDate={selectedDate}
-          setSelectedDate={setSelectedDate}
+          selectedReport={selectedReport}
+          setSelectedReport={setSelectedReport}
+          onRefreshReports={onRefreshReports}
         />
       </div>
 

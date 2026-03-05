@@ -39,7 +39,10 @@ export default function ReportDetail({ loading, error, data, onPrint }) {
       {!loading && data && (
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto pr-1">
           <div className="space-y-2 border-b border-slate-200 pb-4">
-            <p className="text-xs text-slate-600">{data.report_date}</p>
+            <p className="text-xs text-slate-600">
+              {data.report_date}
+              {data.version ? ` · v${data.version}` : ""}
+            </p>
             <h3 className="text-xl font-semibold tracking-tight text-slate-900">
               {data.title || "Daily Trend Report"}
             </h3>
