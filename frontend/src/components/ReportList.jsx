@@ -12,9 +12,13 @@ export default function ReportList({
   loading,
   error,
   reportItems,
-  selectedDate,
-  setSelectedDate,
+  selectedReport,
+  setSelectedReport,
+  onRefreshReports,
 }) {
+  const selectedKey = selectedReport
+    ? `${selectedReport.report_date}-v${selectedReport.version}`
+    : null;
   return (
     <AppCard
       title="보고서 리스트"
@@ -26,13 +30,24 @@ export default function ReportList({
           Daily
         </Badge>
       }
+      actions={
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 rounded-xl border-slate-300 bg-white px-3 text-xs text-slate-700 hover:bg-slate-50"
+          onClick={onRefreshReports}
+        >
+          ↺ 새로고침
+        </Button>
+      }
       className="h-[550px]"
       contentClassName="flex h-full min-h-0 flex-col gap-4"
     >
       <div className="space-y-2">
         <Input
           type="date"
-          value={reportDate}
+          value={reportDate || ""}
           onChange={(e) => setReportDate(e.target.value)}
           className="h-10 border-slate-300 bg-white text-slate-900 focus-visible:ring-teal-500"
         />
@@ -89,16 +104,23 @@ export default function ReportList({
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
         {reportItems.map((item) => (
           <button
-            key={item.report_date}
+            key={`${item.report_date}-v${item.version}`}
             type="button"
             className={`w-full rounded-xl border px-3 py-3 text-left transition-all duration-200 ${
-              selectedDate === item.report_date
+              selectedKey === `${item.report_date}-v${item.version}`
                 ? "border-teal-500/70 bg-slate-100"
                 : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
             }`}
-            onClick={() => setSelectedDate(item.report_date)}
+            onClick={() =>
+              setSelectedReport({
+                report_date: item.report_date,
+                version: item.version,
+              })
+            }
           >
-            <div className="text-xs text-slate-600">{item.report_date}</div>
+            <div className="text-xs text-slate-600">
+              {item.report_date} · v{item.version}
+            </div>
             <div className="mt-1 truncate text-sm font-semibold text-slate-900">
               {item.title || "리포트"}
             </div>
