@@ -17,6 +17,8 @@ x-airflow-common: &airflow-common
     KAFKA_TOPIC_RAW: ${KAFKA_TOPIC_RAW} # 변경: producer에서 참조
     KAFKA_TOPIC_CLEANED: ${KAFKA_TOPIC_CLEANED} # 변경: producer에서 참조
     KAFKA_TOPIC_ERROR: ${KAFKA_TOPIC_ERROR} # 변경: producer에서 참조
+    DUP_METRICS_DIR: /opt/airflow/logs/naver_dup_metrics
+    DUP_METRICS_DIR_5MIN: /opt/airflow/logs/naver_dup_metrics_5min
     AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER} # 변경: airflow-init에서 참조
     AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD} # 변경
     AIRFLOW_ADMIN_FIRSTNAME: ${AIRFLOW_ADMIN_FIRSTNAME} # 변경
@@ -26,7 +28,7 @@ x-airflow-common: &airflow-common
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow:/opt/airflow/airflow
     - ./kafka:/opt/airflow/kafka    # producer 모듈 import 경로
-    - airflow_logs:/opt/airflow/logs
+    - ./airflow/logs:/opt/airflow/logs
     - airflow_plugins:/opt/airflow/plugins
   dns:
     - 8.8.8.8
@@ -179,6 +181,5 @@ services:
 
 volumes:
   airflow_postgres:
-  airflow_logs:
   airflow_plugins:
   kafka_data:
