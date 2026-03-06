@@ -161,9 +161,11 @@ services:
   spark-master:
     <<: *spark_image
     hostname: spark-master
+    command: >
+      bash -lc "/opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+      --host spark-master --port 7077 --webui-port 8080"
     environment:
       - TZ=Asia/Seoul
-      - SPARK_MODE=master
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
       - SPARK_RPC_ENCRYPTION_ENABLED=no
       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
@@ -178,10 +180,11 @@ services:
   spark-worker-1:
     <<: *spark_image
     hostname: spark-worker-1
+    command: >
+      bash -lc "/opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker
+      spark://spark-master:7077 --webui-port 8081"
     environment:
       - TZ=Asia/Seoul
-      - SPARK_MODE=worker
-      - SPARK_MASTER_URL=spark://spark-master:7077
       - SPARK_WORKER_MEMORY=2G
       - SPARK_WORKER_CORES=2
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
@@ -192,7 +195,10 @@ services:
     volumes:
       - ./spark:/opt/spark-app/spark
     depends_on:
-      - spark-master
+      spark-master:
+        condition: service_started
+    ports:
+      - "8089:8081"
 
   spark-batch:
     <<: *spark_image
@@ -203,6 +209,11 @@ services:
     environment:
       TZ: Asia/Seoul
       PYTHONPATH: /opt/spark-app/spark
+
+      # OpenAI (report generation)
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_TEMPERATURE: ${OPENAI_TEMPERATURE:-0.4}
 
       # MySQL (external)
       MYSQL_HOST: ${MYSQL_HOST}
@@ -254,20 +265,17 @@ services:
       - ./spark:/opt/spark-app/spark
 
     command: >
-      bash -lc "
-      spark-submit \
-        --master spark://spark-master:7077 \
-        --conf spark.sql.session.timeZone=Asia/Seoul \
-        --conf spark.driverEnv.PYTHONPATH=/opt/spark-app/spark \
-        --conf spark.executorEnv.PYTHONPATH=/opt/spark-app/spark \
-        --conf spark.driver.extraClassPath=/opt/spark/jars/mysql-connector-j-8.4.0.jar \
-        --conf spark.executor.extraClassPath=/opt/spark/jars/mysql-connector-j-8.4.0.jar \
-        /opt/spark-app/spark/daily_pipeline/daily_pipeline_job.py \
-          --run-date $${RUN_DATE} \
-          --window-days $${WINDOW_DAYS} \
-          --top-n $${TOP_N} \
-          --rebuild-window $${REBUILD_WINDOW}
-      "
+      bash -lc "/opt/spark/bin/spark-submit --master spark://spark-master:7077
+      --conf spark.sql.session.timeZone=Asia/Seoul
+      --conf spark.driverEnv.PYTHONPATH=/opt/spark-app/spark
+      --conf spark.executorEnv.PYTHONPATH=/opt/spark-app/spark
+      --conf spark.driver.extraClassPath=/opt/spark/jars/mysql-connector-j-8.4.0.jar
+      --conf spark.executor.extraClassPath=/opt/spark/jars/mysql-connector-j-8.4.0.jar
+      /opt/spark-app/spark/daily_pipeline/daily_pipeline_job.py
+      --run-date $${RUN_DATE}
+      --window-days $${WINDOW_DAYS}
+      --top-n $${TOP_N}
+      --rebuild-window $${REBUILD_WINDOW}"
 
 volumes:
   redis_data:

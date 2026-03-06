@@ -183,9 +183,9 @@ def list_reports(limit: int = 30) -> Dict[str, Any]:
     일일 보고서 목록.
     """
     sql = (
-        f"SELECT report_date, title, summary, created_at "
+        f"SELECT report_date, version, title, summary, created_at "
         f"FROM {REPORT_TABLE} "
-        "ORDER BY report_date DESC "
+        "ORDER BY report_date DESC, version DESC, created_at DESC "
         "LIMIT %s"
     )
     try:
@@ -201,6 +201,7 @@ def list_reports(limit: int = 30) -> Dict[str, Any]:
         items.append(
             {
                 "report_date": _date_to_iso(r.get("report_date")),
+                "version": r.get("version"),
                 "title": r.get("title"),
                 "summary": r.get("summary"),
                 "created_at": _dt_to_iso(r.get("created_at")),
@@ -210,20 +211,31 @@ def list_reports(limit: int = 30) -> Dict[str, Any]:
 
 
 @app.get("/api/reports/{report_date}")
-def get_report(report_date: str) -> Dict[str, Any]:
+def get_report(report_date: str, version: Optional[int] = None) -> Dict[str, Any]:
     """
     특정 날짜의 보고서 상세.
     """
-    sql = (
-        f"SELECT report_date, title, summary, content_md, keywords_json, created_at "
-        f"FROM {REPORT_TABLE} "
-        "WHERE report_date = %s "
-        "LIMIT 1"
-    )
+    if version is None:
+        sql = (
+            f"SELECT report_date, version, title, summary, content_md, keywords_json, created_at "
+            f"FROM {REPORT_TABLE} "
+            "WHERE report_date = %s "
+            "ORDER BY version DESC, created_at DESC "
+            "LIMIT 1"
+        )
+        params = (report_date,)
+    else:
+        sql = (
+            f"SELECT report_date, version, title, summary, content_md, keywords_json, created_at "
+            f"FROM {REPORT_TABLE} "
+            "WHERE report_date = %s AND version = %s "
+            "LIMIT 1"
+        )
+        params = (report_date, version)
     try:
         with _get_mysql_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (report_date,))
+                cur.execute(sql, params)
                 row = cur.fetchone()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"report query failed: {e}")
@@ -241,6 +253,7 @@ def get_report(report_date: str) -> Dict[str, Any]:
 
     return {
         "report_date": _date_to_iso(row.get("report_date")),
+        "version": row.get("version"),
         "title": row.get("title"),
         "summary": row.get("summary"),
         "content_md": row.get("content_md"),

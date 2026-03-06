@@ -66,22 +66,22 @@ def _build_prompt(report_date: date, rows: List[Dict[str, Any]], top_n: int) -> 
         "items": rows,
     }
 
-    return (
-        "너는 한국어로 데이터 분석 리포트를 작성하는 애널리스트다. "
-        "아래 JSON 데이터를 바탕으로 '일일 트렌드 리포트'를 작성해라. "
-        "반드시 JSON만 출력하고, 다음 스키마를 따라라.\n\n"
-        "{\n"
-        "  \"title\": string,\n"
-        "  \"summary\": string,\n"
-        "  \"content_md\": string (Markdown),\n"
-        "  \"keywords\": string[]\n"
-        "}\n\n"
-        "제약:\n"
-        "- content_md에는 섹션 제목을 ## 로 표기한다.\n"
-        "- keywords는 상위 핵심 키워드 5~10개로 구성한다.\n"
-        "- 데이터가 부족하면 과장하지 말고 '데이터가 제한적'이라고 명시한다.\n\n"
-        f"DATA:\n{json.dumps(payload, ensure_ascii=False)}"
-    )
+    template = _load_prompt_template()
+    return f"{template}{json.dumps(payload, ensure_ascii=False)}"
+
+
+def _load_prompt_template() -> str:
+    env_path = os.getenv("REPORT_PROMPT_PATH")
+    if env_path:
+        path = env_path
+    else:
+        path = os.path.join(os.path.dirname(__file__), "..", "resources", "report_prompt.txt")
+    path = os.path.abspath(path)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().rstrip() + "\n"
+    except FileNotFoundError as e:
+        raise RuntimeError(f"Prompt template not found: {path}") from e
 
 
 def _call_openai(prompt: str) -> Dict[str, Any]:
@@ -130,24 +130,32 @@ def _fallback_report(report_date: date, rows: List[Dict[str, Any]]) -> Dict[str,
     }
 
 
-def _save_report(report_date: date, report: Dict[str, Any]) -> None:
+def _save_report(report_date: date, report: Dict[str, Any]) -> int:
     report_table = os.getenv("REPORT_TABLE", "daily_reports")
-    sql = (
+    next_version_sql = (
+        f"SELECT COALESCE(MAX(version), 0) AS max_version "
+        f"FROM {report_table} "
+        "WHERE report_date = %s "
+        "FOR UPDATE"
+    )
+    insert_sql = (
         f"INSERT INTO {report_table} "
-        "(report_date, title, summary, content_md, keywords_json) "
-        "VALUES (%s,%s,%s,%s,%s) "
-        "ON DUPLICATE KEY UPDATE "
-        "title=VALUES(title), summary=VALUES(summary), content_md=VALUES(content_md), keywords_json=VALUES(keywords_json)"
+        "(report_date, version, title, summary, content_md, keywords_json) "
+        "VALUES (%s,%s,%s,%s,%s,%s)"
     )
 
     keywords_json = json.dumps(report.get("keywords") or [], ensure_ascii=False)
 
     with _mysql_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute(next_version_sql, (report_date.isoformat(),))
+            row = cur.fetchone() or {}
+            version = int(row.get("max_version") or 0) + 1
             cur.execute(
-                sql,
+                insert_sql,
                 (
                     report_date.isoformat(),
+                    version,
                     report.get("title"),
                     report.get("summary"),
                     report.get("content_md"),
@@ -155,6 +163,7 @@ def _save_report(report_date: date, report: Dict[str, Any]) -> None:
                 ),
             )
         conn.commit()
+    return version
 
 
 def main() -> None:
@@ -172,8 +181,8 @@ def main() -> None:
     except Exception:
         report = _fallback_report(report_date, rows)
 
-    _save_report(report_date, report)
-    print(f"report saved for {report_date.isoformat()}")
+    version = _save_report(report_date, report)
+    print(f"report saved for {report_date.isoformat()} (v{version})")
 
 
 if __name__ == "__main__":
