@@ -33,7 +33,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse, parse_qs, urlunparse, quote
 
 from dotenv import load_dotenv
@@ -68,15 +68,19 @@ def build_token_pool(seed: int = 42) -> List[str]:
     random.seed(seed)
 
     hangul_single = list("가나다라마바사아자차카타파하") + list("이그저너내우리더또")
-    particles = ["은", "는", "이", "가", "을", "를", "에", "에서", "로", "으로",
-                 "와", "과", "도", "만", "의", "한", "하다", "했다", "합니다"]
-    numbers = [str(i) for i in range(1, 32)] + ["2026", "2025", "02", "03", "10", "100"]
+    particles = ["은", "는", "가", "을", "를", "에", "에서", "로", "으로",
+                 "와", "과", "도", "만", "의", "한", "하다", "했다"]
+    numbers = [str(i) for i in range(1, 32)] + ["2026", "2025"]
+    numbers += [
+        "1월","2월","3월","4월","5월","6월",
+        "7월","8월","9월","10월","11월","12월"
+    ]
     common_words = [
         "오늘", "어제", "내일", "주말", "아침", "점심", "저녁",
-        "일상", "기록", "후기", "리뷰", "추천", "정리", "공유",
-        "사진", "맛집", "여행", "카페", "운동", "공부", "책", "영화",
+        "일상", "기록", "후기", "리뷰", "추천", "정리", "공유", "비교",
+        "사진", "맛집", "여행", "카페", "운동", "공부", "책", "영화", 
     ]
-    english_single = list("aeiou") + ["t", "n", "s", "r", "l"]
+    english_single = ["t", "n", "s", "r", "l"]
 
     pool = list(set(hangul_single + particles + numbers + common_words + english_single))
     pool = [p.strip() for p in pool if p.strip()]
@@ -306,7 +310,8 @@ def discover_latest(
     sleep_s: float = 0.1,
     max_fetch: int = 1000,
     fetch_sleep_s: float = 0.0,  # deprecated: 병렬 처리로 대체. 하위 호환을 위해 유지.
-) -> Tuple[List[dict], List[dict]]:
+    return_metrics: bool = False,
+) -> Union[Tuple[List[dict], List[dict]], Tuple[List[dict], List[dict], Dict[str, Any]]]:
     """
     네이버 블로그 최신 포스트 수집 + 본문 추출.
 
@@ -329,11 +334,75 @@ def discover_latest(
     discovered_at = datetime.now(KST).isoformat()
 
     # ── URL 발견 단계 ─────────────────────────────
+    # api_calls = 0
+    # for token in tokens:
+    #     for st in starts:
+    #         if len(uniq) >= target_unique:
+    #             break
+    #         api_calls += 1
+    #         try:
+    #             data = naver_blog_search(
+    #                 token, display=display, start=st,
+    #                 client_id=client_id, client_secret=client_secret,
+    #             )
+    #         except Exception as e:
+    #             logger.warning("[discover] API 호출 실패 token=%s start=%d error=%s", token, st, e)
+    #             continue
+
+    #         for it in data.get("items", []):
+    #             link = it.get("link")
+    #             if not link or "blog.naver.com" not in link:
+    #                 continue
+
+    #             norm = to_mobile_naver_blog_url(link)
+    #             if norm in uniq:
+    #                 continue
+
+    #             title = it.get("title") or None
+    #             if title:
+    #                 title = re.sub(r"<[^>]+>", "", title)
+    #                 title = html.unescape(title)
+
+    #             uniq[norm] = DiscoveredItem(
+    #                 url=norm,
+    #                 postdate=it.get("postdate") or None,
+    #                 title=title,
+    #                 bloggername=it.get("bloggername") or None,
+    #                 bloggerlink=it.get("bloggerlink") or None,
+    #                 token=token,
+    #                 discovered_at=discovered_at,
+    #             )
+
+    #             if len(uniq) >= target_unique:
+    #                 break
+
+    #         time.sleep(sleep_s)  # Naver API 레이트 리밋 방지
+
+    #     if len(uniq) >= target_unique:
+    #         break
+
+    # logger.info("[discover] API calls=%d, unique_urls=%d", api_calls, len(uniq))
+
+    # items = list(uniq.values())
+    # if not items:
+    #     logger.info("[discover] 신규 URL이 없음. 빈 결과 반환.")
+    #     return [], []
+
+    # ── 계측 로그 추가 ver ─────────────────────────────
     api_calls = 0
+    call_stats = {
+        "total_items": 0,
+        "total_new": 0,
+        "total_dup": 0,
+        "zero_item_calls": 0,
+    }
+    call_details: List[Dict[str, Any]] = []
+
     for token in tokens:
         for st in starts:
             if len(uniq) >= target_unique:
                 break
+
             api_calls += 1
             try:
                 data = naver_blog_search(
@@ -344,14 +413,27 @@ def discover_latest(
                 logger.warning("[discover] API 호출 실패 token=%s start=%d error=%s", token, st, e)
                 continue
 
-            for it in data.get("items", []):
+            items = data.get("items", []) or []
+            n_items = len(items)
+            call_stats["total_items"] += n_items
+            if n_items == 0:
+                call_stats["zero_item_calls"] += 1
+
+            # ✅ 호출 단위 new/dup 집계
+            new_cnt = 0
+            dup_cnt = 0
+
+            for it in items:
                 link = it.get("link")
                 if not link or "blog.naver.com" not in link:
                     continue
 
                 norm = to_mobile_naver_blog_url(link)
                 if norm in uniq:
+                    dup_cnt += 1
                     continue
+
+                new_cnt += 1
 
                 title = it.get("title") or None
                 if title:
@@ -371,20 +453,49 @@ def discover_latest(
                 if len(uniq) >= target_unique:
                     break
 
-            time.sleep(sleep_s)  # Naver API 레이트 리밋 방지
+            call_stats["total_new"] += new_cnt
+            call_stats["total_dup"] += dup_cnt
+
+            # ✅ 호출마다 중복률 로그
+            denom = new_cnt + dup_cnt
+            dup_rate = (dup_cnt / denom) if denom else 0.0
+            logger.info(
+                "[discover][call] #%d token=%s start=%d items=%d new=%d dup=%d dup_rate=%.2f unique_total=%d",
+                api_calls, token, st, n_items, new_cnt, dup_cnt, dup_rate, len(uniq)
+            )
+            call_details.append({
+                "call_no": api_calls,
+                "token": token,
+                "start": st,
+                "items": n_items,
+                "new": new_cnt,
+                "dup": dup_cnt,
+                "dup_rate": dup_rate,
+                "unique_total": len(uniq),
+            })
+
+            time.sleep(sleep_s)
 
         if len(uniq) >= target_unique:
             break
 
-    logger.info("[discover] API calls=%d, unique_urls=%d", api_calls, len(uniq))
+    # ✅ 런 전체 요약 로그
+    denom = call_stats["total_new"] + call_stats["total_dup"]
+    total_dup_rate = (call_stats["total_dup"] / denom) if denom else 0.0
+    avg_items = (call_stats["total_items"] / api_calls) if api_calls else 0.0
+    zero_rate = (call_stats["zero_item_calls"] / api_calls) if api_calls else 0.0
 
-    items = list(uniq.values())
-    if not items:
-        logger.info("[discover] 신규 URL이 없음. 빈 결과 반환.")
-        return [], []
+    logger.info(
+        "[discover][summary] api_calls=%d unique_urls=%d total_items=%d avg_items=%.1f "
+        "total_new=%d total_dup=%d total_dup_rate=%.2f zero_item_calls=%d zero_rate=%.2f",
+        api_calls, len(uniq), call_stats["total_items"], avg_items,
+        call_stats["total_new"], call_stats["total_dup"], total_dup_rate,
+        call_stats["zero_item_calls"], zero_rate
+    )
 
     # ── 병렬 본문 추출 단계 ───────────────────────
-    fetch_items = items[:max_fetch]
+    all_discovered = list(uniq.values())
+    fetch_items = all_discovered[:max_fetch]
     logger.info(
         "[discover] 병렬 fetch 시작: %d URLs, workers=%d, timeout=%ds",
         len(fetch_items), MAX_WORKERS, FETCH_TIMEOUT,
@@ -400,6 +511,36 @@ def discover_latest(
         len(posts), len(failures), elapsed, rate,
     )
 
+    metrics: Dict[str, Any] = {
+        "discovered_at": discovered_at,
+        "params": {
+            "target_unique": target_unique,
+            "display": display,
+            "starts": starts,
+            "tokens_per_run": tokens_per_run,
+            "seed": seed,
+            "sleep_s": sleep_s,
+            "max_fetch": max_fetch,
+        },
+        "summary": {
+            "api_calls": api_calls,
+            "unique_urls": len(uniq),
+            "total_items": call_stats["total_items"],
+            "avg_items": avg_items,
+            "total_new": call_stats["total_new"],
+            "total_dup": call_stats["total_dup"],
+            "total_dup_rate": total_dup_rate,
+            "zero_item_calls": call_stats["zero_item_calls"],
+            "zero_rate": zero_rate,
+        },
+        "tokens": tokens,
+        "calls": call_details,
+        "discovered_urls": [it.url for it in all_discovered],
+        "discovered_count": len(all_discovered),
+    }
+
+    if return_metrics:
+        return posts, failures, metrics
     return posts, failures
 
 
@@ -430,6 +571,8 @@ def main():
 
     starts = [int(x.strip()) for x in args.starts.split(",") if x.strip()]
 
+    logger.info("discover_latest 호출: starts=%s tokens=%s display=%s", starts, args.tokens, args.display)
+    
     posts, failures = discover_latest(
         client_id=client_id,
         client_secret=client_secret,
