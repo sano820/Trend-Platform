@@ -32,11 +32,23 @@ class WindowEventCount(ProcessWindowFunction):
 
 
 class TrafficMetricsProcess(KeyedProcessFunction):
-    def __init__(self, redis_host: str, redis_port: int, redis_db: int, redis_key: str):
+    def __init__(
+        self,
+        redis_host: str,
+        redis_port: int,
+        redis_db: int,
+        redis_key: str,
+        redis_window_key_prefix: str,
+        redis_ttl_seconds: int,
+        redis_window_ttl_seconds: int,
+    ):
         self.redis_host = redis_host
         self.redis_port = redis_port
         self.redis_db = redis_db
         self.redis_key = redis_key
+        self.redis_window_key_prefix = redis_window_key_prefix
+        self.redis_ttl_seconds = redis_ttl_seconds
+        self.redis_window_ttl_seconds = redis_window_ttl_seconds
         self.redis_client = None
 
     def open(self, runtime_context: RuntimeContext):
@@ -94,7 +106,10 @@ class TrafficMetricsProcess(KeyedProcessFunction):
             "summary": summary,
         }
         payload_json = json.dumps(payload, ensure_ascii=False)
-        self.redis_client.set(self.redis_key, payload_json)
+        # latest 키 overwrite + window_end 보조키(짧은 TTL)로 idempotent/복구 검증을 동시에 보장
+        self.redis_client.set(self.redis_key, payload_json, ex=self.redis_ttl_seconds)
+        window_key = f"{self.redis_window_key_prefix}:{window_end}"
+        self.redis_client.set(window_key, payload_json, ex=self.redis_window_ttl_seconds)
         yield payload_json
 
         expire_before = window_end_ms - (40 * 60 * 1000)
@@ -111,13 +126,22 @@ def build_job():
     kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:29092")
     kafka_topic = os.getenv("KAFKA_TOPIC", "blog.cleaned")
     kafka_group_id = os.getenv("KAFKA_GROUP_ID", "flink-traffic-10m")
-    kafka_start = os.getenv("KAFKA_STARTING_OFFSETS", "latest").lower()
+    kafka_start = os.getenv("KAFKA_STARTING_OFFSETS", "group-offsets").lower()
+    kafka_auto_offset_reset = os.getenv("KAFKA_AUTO_OFFSET_RESET", "latest")
     redis_host = os.getenv("REDIS_HOST", "localhost")
     redis_port = int(os.getenv("REDIS_PORT", "6379"))
     redis_db = int(os.getenv("REDIS_DB", "0"))
     redis_key = os.getenv("REDIS_KEY_TREND", "trend:traffic:10m")
+    redis_window_key_prefix = os.getenv("REDIS_KEY_TREND_WINDOW_PREFIX", "trend:traffic:10m")
+    redis_ttl_seconds = int(os.getenv("REDIS_TREND_TTL_SECONDS", "86400"))
+    redis_window_ttl_seconds = int(os.getenv("REDIS_WINDOW_TTL_SECONDS", "21600"))
 
-    startup_mode = "earliest-offset" if kafka_start == "earliest" else "latest-offset"
+    if kafka_start in ("earliest", "earliest-offset"):
+        startup_mode = "earliest-offset"
+    elif kafka_start in ("latest", "latest-offset"):
+        startup_mode = "latest-offset"
+    else:
+        startup_mode = "group-offsets"
 
     env = StreamExecutionEnvironment.get_execution_environment()
     env.set_parallelism(1)
@@ -134,6 +158,7 @@ def build_job():
           'topic' = '{kafka_topic}',
           'properties.bootstrap.servers' = '{kafka_bootstrap_servers}',
           'properties.group.id' = '{kafka_group_id}',
+          'properties.auto.offset.reset' = '{kafka_auto_offset_reset}',
           'scan.startup.mode' = '{startup_mode}',
           'format' = 'raw'
         )
@@ -171,6 +196,9 @@ def build_job():
                 redis_port=redis_port,
                 redis_db=redis_db,
                 redis_key=redis_key,
+                redis_window_key_prefix=redis_window_key_prefix,
+                redis_ttl_seconds=redis_ttl_seconds,
+                redis_window_ttl_seconds=redis_window_ttl_seconds,
             ),
             output_type=Types.STRING(),
         )

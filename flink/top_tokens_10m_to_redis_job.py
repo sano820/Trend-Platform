@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import redis
@@ -18,13 +18,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("top-tokens-10m")
 
 
+SCHEMA_VERSION = "v1"
+TIME_BASIS = "processing_time"
+KST = timezone(timedelta(hours=9))
+
 URL_RE = re.compile(r"(https?://\S+|www\.\S+)", re.IGNORECASE)
 EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 NON_WORD_RE = re.compile(r"[^\w\s]", re.UNICODE)
 SPACES_RE = re.compile(r"\s+")
 ONLY_DIGITS_RE = re.compile(r"^\d+$")
 NOISE_RE = re.compile(r"^[ㅋㅎㅠㅜ]+$")
-
 
 DEFAULT_STOPWORDS = {
     "그리고",
@@ -47,12 +50,12 @@ DEFAULT_STOPWORDS = {
 }
 
 
-def format_utc_z(epoch_ms: int) -> str:
-    return (
-        datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
+def format_kst_iso(epoch_ms: int) -> str:
+    return datetime.fromtimestamp(epoch_ms / 1000, tz=KST).isoformat()
+
+
+def now_kst_iso() -> str:
+    return datetime.now(tz=KST).isoformat()
 
 
 def tokenize_text(
@@ -62,16 +65,10 @@ def tokenize_text(
     max_tokens_per_post: int,
 ) -> list[str]:
     raw_text = f"{title or ''} {content_text or ''}"
-
-    # 1) URL/이메일 제거 (특수문자 제거 전에 먼저)
     text = URL_RE.sub(" ", raw_text)
     text = EMAIL_RE.sub(" ", text)
-
-    # 2) 소문자 + 공백 정규화
     text = text.lower()
     text = SPACES_RE.sub(" ", text).strip()
-
-    # 3) 문자/숫자/공백만 유지 (#은 제거되고 단어는 유지됨)
     text = NON_WORD_RE.sub(" ", text)
     text = SPACES_RE.sub(" ", text).strip()
 
@@ -98,26 +95,25 @@ def tokenize_text(
 
 
 class WindowTopTokensFunction(ProcessAllWindowFunction):
-    def __init__(self, top_n: int, stopwords: set[str], max_tokens_per_post: int):
-        self.top_n = top_n
+    def __init__(self, stopwords: set[str], max_tokens_per_post: int):
         self.stopwords = stopwords
         self.max_tokens_per_post = max_tokens_per_post
 
     def process(self, context, elements):
-        # top_tokens는 DF 집계 유지:
-        # - total_posts: 윈도우 내 고유 게시글 수(url dedup)
-        # - count[token]: 토큰을 포함한 고유 게시글 수
+        # v1 정의:
+        # - total_posts: 윈도우 내 이벤트 수(메시지 수)
+        # - all_counts[token]: 토큰을 포함한 고유 게시글 수(DF)
         total_posts = 0
-        token_counts = {}
+        token_counts: dict[str, int] = {}
         seen_post_ids = set()
 
         for raw in elements:
+            total_posts += 1
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
                 continue
 
-            # 요구사항: post_id는 url 기준
             post_id = data.get("url")
             if not post_id:
                 continue
@@ -125,58 +121,57 @@ class WindowTopTokensFunction(ProcessAllWindowFunction):
                 continue
             seen_post_ids.add(post_id)
 
-            total_posts += 1
-
             tokens = tokenize_text(
                 title=data.get("title"),
                 content_text=data.get("content_text"),
                 stopwords=self.stopwords,
                 max_tokens_per_post=self.max_tokens_per_post,
             )
-
-            # DF 방식: 게시글당 토큰 1회만 카운트
             for token in set(tokens):
                 token_counts[token] = token_counts.get(token, 0) + 1
 
-        # 정렬 우선순위: count desc, token asc
-        sorted_tokens = sorted(token_counts.items(), key=lambda x: (-x[1], x[0]))
-        top_items = [{"token": t, "count": c} for t, c in sorted_tokens[: self.top_n]]
-
-        window_start_ms = context.window().start
-        window_end_ms = context.window().end
-
         payload = {
-            "window_start_ms": window_start_ms,
-            "window_end_ms": window_end_ms,
+            "schema_version": SCHEMA_VERSION,
+            "window_start": format_kst_iso(context.window().start),
+            "window_end": format_kst_iso(context.window().end),
             "total_posts": total_posts,
-            "top_n": self.top_n,
-            "top_items": top_items,
-            # prev_count 계산 정확도를 위해 전체 token count를 함께 전달
             "all_counts": token_counts,
+            "time_basis": TIME_BASIS,
+            "generated_at": now_kst_iso(),
         }
         yield json.dumps(payload, ensure_ascii=False)
 
 
-class TopTokensTrendProcess(KeyedProcessFunction):
-    def __init__(self, redis_host: str, redis_port: int, redis_db: int, redis_key: str, ttl_seconds: int):
+class TopTokensProcess(KeyedProcessFunction):
+    def __init__(
+        self,
+        redis_host: str,
+        redis_port: int,
+        redis_db: int,
+        redis_key: str,
+        redis_window_key_prefix: str,
+        redis_candidate_key_prefix: str,
+        ttl_seconds: int,
+        redis_window_ttl_seconds: int,
+        top_n: int,
+    ):
         self.redis_host = redis_host
         self.redis_port = redis_port
         self.redis_db = redis_db
         self.redis_key = redis_key
+        self.redis_window_key_prefix = redis_window_key_prefix
+        self.redis_candidate_key_prefix = redis_candidate_key_prefix
         self.ttl_seconds = ttl_seconds
+        self.redis_window_ttl_seconds = redis_window_ttl_seconds
+        self.top_n = top_n
         self.redis_client = None
 
     def open(self, runtime_context: RuntimeContext):
-        # UTC 일자 내 누적 카운트 상태
-        self.cum_counts = runtime_context.get_map_state(
-            MapStateDescriptor("cum_counts", Types.STRING(), Types.LONG())
-        )
-        # 누적 기준 UTC 일자 (YYYYMMDD int)
-        self.current_utc_day = runtime_context.get_state(
-            ValueStateDescriptor("current_utc_day", Types.INT())
+        self.prev_counts = runtime_context.get_map_state(
+            MapStateDescriptor("top_prev_counts", Types.STRING(), Types.LONG())
         )
         self.last_window_end = runtime_context.get_state(
-            ValueStateDescriptor("last_window_end", Types.LONG())
+            ValueStateDescriptor("top_last_window_end", Types.STRING())
         )
         self.redis_client = redis.Redis(
             host=self.redis_host,
@@ -189,87 +184,78 @@ class TopTokensTrendProcess(KeyedProcessFunction):
         _, raw_payload = value
         data = json.loads(raw_payload)
 
-        window_start_ms = data["window_start_ms"]
-        window_end_ms = data["window_end_ms"]
-        total_posts = data["total_posts"]
-        top_n = data["top_n"]
-        all_counts = data["all_counts"]
-
-        # 같은 윈도우 중복 처리 방지
+        window_end = data["window_end"]
         last_end = self.last_window_end.value()
-        if last_end is not None and window_end_ms <= last_end:
+        if last_end is not None and window_end <= last_end:
             return
 
-        # UTC 날짜가 바뀌면 누적 상태 초기화
-        utc_day = int(
-            datetime.fromtimestamp(window_end_ms / 1000, tz=timezone.utc).strftime("%Y%m%d")
-        )
-        prev_day = self.current_utc_day.value()
-        if prev_day is None:
-            self.current_utc_day.update(utc_day)
-        elif utc_day != prev_day:
-            for token in list(self.cum_counts.keys()):
-                self.cum_counts.remove(token)
-            self.current_utc_day.update(utc_day)
+        total_posts = int(data.get("total_posts", 0))
+        all_counts = {k: int(v) for k, v in data.get("all_counts", {}).items()}
 
-        # count_cum[token] += window_count[token]
-        for token, window_count in all_counts.items():
-            previous = self.cum_counts.get(token)
-            if previous is None:
-                previous = 0
-            self.cum_counts.put(token, int(previous) + int(window_count))
-
-        # 누적 기준 Top-N 추출
-        cum_items = sorted(
-            ((token, int(count)) for token, count in self.cum_counts.items()),
-            key=lambda x: (-x[1], x[0]),
-        )[:top_n]
-
+        sorted_tokens = sorted(all_counts.items(), key=lambda x: (-x[1], x[0]))[: self.top_n]
         items = []
-        for idx, (token, count) in enumerate(cum_items, start=1):
-            window_increment = int(all_counts.get(token, 0))
-            prev_count = count - window_increment
-
-            # share는 DF 기준 점유율:
-            # count(토큰 포함 게시글 수) / total_posts(고유 게시글 수)
-            share = (count / total_posts) if total_posts > 0 else 0.0
+        for idx, (token, count) in enumerate(sorted_tokens, start=1):
+            prev_count = self.prev_counts.get(token)
+            if prev_count is None:
+                prev_count = 0
 
             if prev_count > 0:
                 increase_rate = (count - prev_count) / prev_count
                 increase_label = None
-            elif count == 0:
-                increase_rate = None
-                increase_label = "—"
-            else:
+            elif count > 0:
                 increase_rate = None
                 increase_label = "NEW"
+            else:
+                increase_rate = None
+                increase_label = "—"
 
+            share = (count / total_posts) if total_posts > 0 else 0.0
             items.append(
                 {
                     "rank": idx,
                     "token": token,
                     "count": count,
                     "share": round(share, 4),
-                    "prev_count": prev_count,
+                    "prev_count": int(prev_count),
                     "increase_rate": None if increase_rate is None else round(increase_rate, 4),
                     "increase_label": increase_label,
                 }
             )
 
         output = {
-            "window_start": format_utc_z(window_start_ms),
-            "window_end": format_utc_z(window_end_ms),
+            "schema_version": SCHEMA_VERSION,
+            "window_start": data["window_start"],
+            "window_end": window_end,
+            "generated_at": now_kst_iso(),
             "total_posts": total_posts,
-            "top_n": top_n,
+            "top_n": self.top_n,
+            "time_basis": TIME_BASIS,
             "items": items,
         }
         output_json = json.dumps(output, ensure_ascii=False)
 
-        # 최신 결과 1건 유지 + TTL 24h
+        # latest + snapshot 저장
         self.redis_client.set(self.redis_key, output_json, ex=self.ttl_seconds)
+        self.redis_client.set(
+            f"{self.redis_window_key_prefix}:{window_end}",
+            output_json,
+            ex=self.redis_window_ttl_seconds,
+        )
+
+        # 중간 스키마(candidate) snapshot 저장
+        self.redis_client.set(
+            f"{self.redis_candidate_key_prefix}:{window_end}",
+            json.dumps(data, ensure_ascii=False),
+            ex=self.redis_window_ttl_seconds,
+        )
+
         yield output_json
 
-        self.last_window_end.update(window_end_ms)
+        for token in list(self.prev_counts.keys()):
+            self.prev_counts.remove(token)
+        for token, count in all_counts.items():
+            self.prev_counts.put(token, int(count))
+        self.last_window_end.update(window_end)
 
     def close(self):
         if self.redis_client is not None:
@@ -277,7 +263,6 @@ class TopTokensTrendProcess(KeyedProcessFunction):
 
 
 def load_stopwords() -> set[str]:
-    # 1) 파일 로드 우선 (줄 단위, '#' 주석 허용)
     stopwords_file = os.getenv(
         "TOP_TOKENS_STOPWORDS_FILE",
         os.path.join(os.path.dirname(__file__), "stopwords_ko.txt"),
@@ -294,7 +279,6 @@ def load_stopwords() -> set[str]:
         except OSError:
             file_words = set()
 
-    # 2) 환경변수 CSV 추가/덮어쓰기
     csv_value = os.getenv("TOP_TOKENS_STOPWORDS", "").strip()
     if not csv_value:
         return file_words if file_words else set(DEFAULT_STOPWORDS)
@@ -310,14 +294,26 @@ def build_job():
     kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:29092")
     kafka_topic = os.getenv("KAFKA_TOPIC", "blog.cleaned")
     kafka_group_id = os.getenv("KAFKA_TOP_TOKENS_GROUP_ID", "flink-top-tokens-10m")
-    kafka_start = os.getenv("KAFKA_STARTING_OFFSETS", "latest").lower()
-    startup_mode = "earliest-offset" if kafka_start == "earliest" else "latest-offset"
+    kafka_start = os.getenv("KAFKA_STARTING_OFFSETS", "group-offsets").lower()
+    kafka_auto_offset_reset = os.getenv("KAFKA_AUTO_OFFSET_RESET", "latest")
+
+    if kafka_start in ("earliest", "earliest-offset"):
+        startup_mode = "earliest-offset"
+    elif kafka_start in ("latest", "latest-offset"):
+        startup_mode = "latest-offset"
+    else:
+        startup_mode = "group-offsets"
 
     redis_host = os.getenv("REDIS_HOST", "localhost")
     redis_port = int(os.getenv("REDIS_PORT", "6379"))
     redis_db = int(os.getenv("REDIS_DB", "0"))
     redis_key = os.getenv("REDIS_KEY_TOP", "trend:top_tokens:10m")
+    redis_window_key_prefix = os.getenv("REDIS_KEY_TOP_WINDOW_PREFIX", "trend:top_tokens:10m")
+    redis_candidate_key_prefix = os.getenv(
+        "REDIS_KEY_CANDIDATE_WINDOW_PREFIX", "trend:candidate_tokens:10m"
+    )
     ttl_seconds = int(os.getenv("REDIS_TOP_TOKENS_TTL_SECONDS", "86400"))
+    redis_window_ttl_seconds = int(os.getenv("REDIS_WINDOW_TTL_SECONDS", "86400"))
 
     top_n = int(os.getenv("TOP_TOKENS_N", "20"))
     max_tokens_per_post = int(os.getenv("MAX_TOKENS_PER_POST", "300"))
@@ -326,7 +322,6 @@ def build_job():
     env = StreamExecutionEnvironment.get_execution_environment()
     env.set_parallelism(1)
     table_env = StreamTableEnvironment.create(env)
-    table_env.get_config().set("table.local-time-zone", "UTC")
 
     table_env.execute_sql(
         f"""
@@ -337,6 +332,7 @@ def build_job():
           'topic' = '{kafka_topic}',
           'properties.bootstrap.servers' = '{kafka_bootstrap_servers}',
           'properties.group.id' = '{kafka_group_id}',
+          'properties.auto.offset.reset' = '{kafka_auto_offset_reset}',
           'scan.startup.mode' = '{startup_mode}',
           'format' = 'raw'
         )
@@ -350,15 +346,12 @@ def build_job():
         """
     )
 
-    source_stream = table_env.to_data_stream(source_table)
+    events = table_env.to_data_stream(source_table).map(lambda row: row[0], output_type=Types.STRING())
 
-    events = source_stream.map(lambda row: row[0], output_type=Types.STRING())
-
-    top_tokens_windowed = events.window_all(
+    candidate_stream = events.window_all(
         TumblingProcessingTimeWindows.of(Time.minutes(10))
     ).process(
         WindowTopTokensFunction(
-            top_n=top_n,
             stopwords=stopwords,
             max_tokens_per_post=max_tokens_per_post,
         ),
@@ -366,31 +359,34 @@ def build_job():
     )
 
     results = (
-        top_tokens_windowed.map(
+        candidate_stream.map(
             lambda x: ("global", x),
             output_type=Types.TUPLE([Types.STRING(), Types.STRING()]),
         )
         .key_by(lambda x: x[0], key_type=Types.STRING())
         .process(
-            TopTokensTrendProcess(
+            TopTokensProcess(
                 redis_host=redis_host,
                 redis_port=redis_port,
                 redis_db=redis_db,
                 redis_key=redis_key,
+                redis_window_key_prefix=redis_window_key_prefix,
+                redis_candidate_key_prefix=redis_candidate_key_prefix,
                 ttl_seconds=ttl_seconds,
+                redis_window_ttl_seconds=redis_window_ttl_seconds,
+                top_n=top_n,
             ),
             output_type=Types.STRING(),
         )
     )
 
     results.print()
-
     logger.info(
-        "Starting top-tokens job: topic=%s window=10m tumbling top_n=%s redis_key=%s ttl=%ss time_basis=processing_time count_mode=cumulative_daily_reset_utc",
+        "Starting top-tokens job(v1): topic=%s window=10m tumbling redis_key=%s candidate_prefix=%s time_basis=%s",
         kafka_topic,
-        top_n,
         redis_key,
-        ttl_seconds,
+        redis_candidate_key_prefix,
+        TIME_BASIS,
     )
     env.execute("blog-cleaned-top-tokens-10m")
 
